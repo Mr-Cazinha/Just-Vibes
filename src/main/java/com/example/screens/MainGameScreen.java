@@ -35,6 +35,8 @@ public class MainGameScreen implements Screen {
     private static final float SHOOT_DELAY = 0.5f;
     private static final float RESPAWN_DELAY = 3.0f;
     private static final int BULLET_DAMAGE = 20;
+    private boolean isConnected = false;
+    private float connectionTimeout = 5.0f; // 5 seconds timeout
 
     public MainGameScreen(MyGame game, String serverIp) {
         this.game = game;
@@ -46,6 +48,7 @@ public class MainGameScreen implements Screen {
         try {
             this.client = new GameClient(serverIp);
             setupNetworkHandlers();
+            Gdx.app.log("MainGameScreen", "Sending JOIN request to server");
             client.sendJoin();
         } catch (IOException e) {
             throw new RuntimeException("Failed to initialize network client", e);
@@ -53,75 +56,187 @@ public class MainGameScreen implements Screen {
     }
 
     private void setupNetworkHandlers() {
+        // Initial connection and player setup
         client.registerHandler("JOIN", parts -> {
+            if (parts.length < 4) {
+                Gdx.app.error("MainGameScreen", "Invalid JOIN message format");
+                return;
+            }
             String playerId = parts[1];
             float x = Float.parseFloat(parts[2]);
             float y = Float.parseFloat(parts[3]);
             
             Gdx.app.postRunnable(() -> {
-                Player player = new Player(playerId, x, y);
-                players.put(playerId, player);
-                
-                // If this is our first JOIN message, set up the local player
-                if (localPlayer == null) {
-                    localPlayerId = playerId;
-                    localPlayer = player;
-                    localPlayer.color = com.badlogic.gdx.graphics.Color.GREEN; // Distinguish local player
+                Gdx.app.log("MainGameScreen", "Received JOIN response. Creating local player with ID: " + playerId);
+                localPlayerId = playerId;
+                localPlayer = new Player(playerId, x, y, true);
+                players.put(playerId, localPlayer);
+                isConnected = true;
+                Gdx.app.log("MainGameScreen", "Local player added to players map. Total players: " + players.size());
+            });
+        });
+
+        // Other player updates
+        client.registerHandler("CLIENT", parts -> {
+            if (parts.length < 8) return;
+            String playerId = parts[1];
+            float x = Float.parseFloat(parts[2]);
+            float y = Float.parseFloat(parts[3]);
+            float dirX = Float.parseFloat(parts[4]);
+            float dirY = Float.parseFloat(parts[5]);
+            int health = Integer.parseInt(parts[6]);
+            boolean isDead = Boolean.parseBoolean(parts[7]);
+            
+            Gdx.app.postRunnable(() -> {
+                if (!playerId.equals(localPlayerId)) {
+                    Player player = players.get(playerId);
+                    if (player == null) {
+                        Gdx.app.log("MainGameScreen", "New remote player joined with ID: " + playerId);
+                        player = new Player(playerId, x, y, false);
+                        players.put(playerId, player);
+                    }
+                    updatePlayerState(player, x, y, dirX, dirY, health, isDead);
                 }
             });
         });
 
+        // Position updates
         client.registerHandler("POS", parts -> {
+            if (parts.length < 4) return;
             String playerId = parts[1];
             float x = Float.parseFloat(parts[2]);
             float y = Float.parseFloat(parts[3]);
             
-            // Only update position for other players
             if (!playerId.equals(localPlayerId)) {
                 Gdx.app.postRunnable(() -> {
                     Player player = players.get(playerId);
                     if (player != null) {
-                        player.position.set(x, y);
+                        player.updateNetworkPosition(x, y);
                     }
                 });
             }
         });
 
+        // Combat actions
         client.registerHandler("SHOOT", parts -> {
+            if (parts.length < 6) return;
             String playerId = parts[1];
             float x = Float.parseFloat(parts[2]);
             float y = Float.parseFloat(parts[3]);
             float dirX = Float.parseFloat(parts[4]);
             float dirY = Float.parseFloat(parts[5]);
             
+            if (!playerId.equals(localPlayerId)) {
+                Gdx.app.postRunnable(() -> {
+                    Player shooter = players.get(playerId);
+                    if (shooter != null) {
+                        shooter.position.set(x, y);
+                        shooter.direction.set(dirX, dirY).nor();
+                        bullets.add(new Bullet(playerId, x, y, dirX, dirY));
+                    }
+                });
+            }
+        });
+
+        client.registerHandler("DEATH", parts -> {
+            if (parts.length < 3) return;
+            String playerId = parts[1];
+            
             Gdx.app.postRunnable(() -> {
-                Player shooter = players.get(playerId);
-                if (shooter != null && !playerId.equals(localPlayerId)) {
-                    // Update shooter's position and direction
-                    shooter.position.set(x, y);
-                    shooter.direction.set(dirX, dirY).nor();
-                    // Create the bullet
-                    bullets.add(new Bullet(playerId, x, y, dirX, dirY));
+                Player player = players.get(playerId);
+                if (player != null) {
+                    player.setDead(true);
+                }
+            });
+        });
+
+        client.registerHandler("RESPAWN", parts -> {
+            if (parts.length < 4) return;
+            String playerId = parts[1];
+            float x = Float.parseFloat(parts[2]);
+            float y = Float.parseFloat(parts[3]);
+            
+            Gdx.app.postRunnable(() -> {
+                Player player = players.get(playerId);
+                if (player != null) {
+                    player.respawn(x, y);
                 }
             });
         });
     }
 
+    private void updatePlayerState(Player player, float x, float y, float dirX, float dirY, int health, boolean isDead) {
+        if (!player.isLocal()) {
+            player.updateNetworkPosition(x, y);
+            player.direction.set(dirX, dirY);
+            player.setHealth(health);
+            player.setDead(isDead);
+        }
+    }
+
     @Override
     public void render(float delta) {
-        // Update
-        handleInput(delta);
-        updateBullets(delta);
-        updateRespawnTimer(delta);
-        checkCollisions();
+        // Check connection timeout
+        if (!isConnected) {
+            connectionTimeout -= delta;
+            if (connectionTimeout <= 0) {
+                Gdx.app.error("MainGameScreen", "Connection timeout. Failed to receive JOIN response");
+                return;
+            }
+        }
+
+        // Update game state
+        updateGameState(delta);
         
-        // Clear screen
+        // Clear screen and prepare for rendering
         Gdx.gl.glClearColor(0.1f, 0.1f, 0.1f, 1);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
 
         camera.update();
         shapeRenderer.setProjectionMatrix(camera.combined);
 
+        // Render game elements
+        renderGameElements();
+    }
+
+    private void updateGameState(float delta) {
+        handleInput(delta);
+        updateBullets(delta);
+        updateRespawnTimer(delta);
+        
+        // Update all players
+        for (Player player : players.values()) {
+            if (player != null) {
+                if (player.isLocal()) {
+                    float moveX = 0, moveY = 0;
+                    if (Gdx.input.isKeyPressed(Keys.A)) moveX -= 1;
+                    if (Gdx.input.isKeyPressed(Keys.D)) moveX += 1;
+                    if (Gdx.input.isKeyPressed(Keys.W)) moveY += 1;
+                    if (Gdx.input.isKeyPressed(Keys.S)) moveY -= 1;
+
+                    // Normalize diagonal movement
+                    if (moveX != 0 && moveY != 0) {
+                        float length = (float) Math.sqrt(moveX * moveX + moveY * moveY);
+                        moveX /= length;
+                        moveY /= length;
+                    }
+
+                    player.update(delta, moveX, moveY);
+                } else {
+                    player.update(delta, 0, 0); // Update network interpolation
+                }
+            }
+        }
+        
+        checkCollisions();
+
+        // Update shoot cooldown
+        if (shootCooldown > 0) {
+            shootCooldown -= delta;
+        }
+    }
+
+    private void renderGameElements() {
         // Render background
         shapeRenderer.begin(ShapeType.Filled);
         cityBackground.render(shapeRenderer);
@@ -130,7 +245,9 @@ public class MainGameScreen implements Screen {
         // Render players
         shapeRenderer.begin(ShapeType.Filled);
         for (Player player : players.values()) {
-            player.render(shapeRenderer);
+            if (player != null) {
+                player.render(shapeRenderer);
+            }
         }
         shapeRenderer.end();
 
@@ -140,11 +257,6 @@ public class MainGameScreen implements Screen {
             bullet.render(shapeRenderer);
         }
         shapeRenderer.end();
-
-        // Update shoot cooldown
-        if (shootCooldown > 0) {
-            shootCooldown -= delta;
-        }
     }
 
     private void checkCollisions() {
@@ -157,7 +269,7 @@ public class MainGameScreen implements Screen {
                     // If this is our player, notify server about damage
                     if (player == localPlayer) {
                         try {
-                            client.sendDamage(bullet.shooterId, BULLET_DAMAGE);
+                            client.sendDamage(String.valueOf(bullet.shooterId), BULLET_DAMAGE);
                         } catch (IOException e) {
                             Gdx.app.error("MainGameScreen", "Failed to send damage", e);
                         }
@@ -205,8 +317,11 @@ public class MainGameScreen implements Screen {
             moveY /= length;
         }
 
+        // Update player movement and direction
+        localPlayer.update(delta, moveX, moveY);
+        
+        // Send position update if moving
         if (moveX != 0 || moveY != 0) {
-            localPlayer.update(delta, moveX, moveY);
             try {
                 client.sendPosition(localPlayer.position.x, localPlayer.position.y);
             } catch (IOException e) {

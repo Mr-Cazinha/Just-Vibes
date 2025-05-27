@@ -15,7 +15,6 @@ public class GameClient {
     private final InetAddress serverAddress;
     private final byte[] receiveBuffer = new byte[BUFFER_SIZE];
     private boolean running = true;
-    private String clientId;
 
     private final Map<String, Consumer<String[]>> messageHandlers = new ConcurrentHashMap<>();
 
