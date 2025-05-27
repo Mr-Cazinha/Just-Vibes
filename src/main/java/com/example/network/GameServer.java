@@ -80,11 +80,9 @@ public class GameServer {
 
             case "SHOOT":
                 if (client.isDead) break;
-                float shotX = Float.parseFloat(parts[1]);
-                float shotY = Float.parseFloat(parts[2]);
-                float dirX = Float.parseFloat(parts[3]);
-                float dirY = Float.parseFloat(parts[4]);
-                broadcastShot(clientId, shotX, shotY, dirX, dirY);
+                float dirX = Float.parseFloat(parts[1]);
+                float dirY = Float.parseFloat(parts[2]);
+                broadcastShot(clientId, client.x, client.y, dirX, dirY);
                 break;
 
             case "DAMAGE":

@@ -89,16 +89,19 @@ public class MainGameScreen implements Screen {
 
         client.registerHandler("SHOOT", parts -> {
             String playerId = parts[1];
-            float dirX = Float.parseFloat(parts[2]);
-            float dirY = Float.parseFloat(parts[3]);
+            float x = Float.parseFloat(parts[2]);
+            float y = Float.parseFloat(parts[3]);
+            float dirX = Float.parseFloat(parts[4]);
+            float dirY = Float.parseFloat(parts[5]);
             
             Gdx.app.postRunnable(() -> {
                 Player shooter = players.get(playerId);
-                if (shooter != null) {
-                    bullets.add(new Bullet(playerId, 
-                        shooter.position.x, 
-                        shooter.position.y,
-                        dirX, dirY));
+                if (shooter != null && !playerId.equals(localPlayerId)) {
+                    // Update shooter's position and direction
+                    shooter.position.set(x, y);
+                    shooter.direction.set(dirX, dirY).nor();
+                    // Create the bullet
+                    bullets.add(new Bullet(playerId, x, y, dirX, dirY));
                 }
             });
         });
