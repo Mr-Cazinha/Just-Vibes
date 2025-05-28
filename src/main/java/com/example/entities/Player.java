@@ -134,6 +134,10 @@ public class Player {
         this.health = Math.min(Math.max(health, 0), MAX_HEALTH);
     }
 
+    public int getHealth() {
+        return health;
+    }
+
     public void setDead(boolean dead) {
         isDead = dead;
         if (dead) {

@@ -4,6 +4,7 @@ import com.badlogic.gdx.Game;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.example.screens.MainGameScreen;
 import com.example.screens.ConnectionScreen;
+import com.badlogic.gdx.Gdx;
 
 public class MyGame extends Game {
     public SpriteBatch batch;
@@ -17,6 +18,11 @@ public class MyGame extends Game {
     public void startGame(String serverIp) {
         getScreen().dispose();
         setScreen(new MainGameScreen(this, serverIp));
+    }
+
+    public void exit() {
+        dispose();
+        Gdx.app.exit();
     }
 
     @Override

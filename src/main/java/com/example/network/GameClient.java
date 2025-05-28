@@ -15,13 +15,31 @@ public class GameClient {
     private final InetAddress serverAddress;
     private final byte[] receiveBuffer = new byte[BUFFER_SIZE];
     private boolean running = true;
+    private Runnable onServerShutdown;
 
     private final Map<String, Consumer<String[]>> messageHandlers = new ConcurrentHashMap<>();
 
     public GameClient(String serverHost) throws IOException {
         socket = new DatagramSocket();
         serverAddress = InetAddress.getByName(serverHost);
+        setupDefaultHandlers();
         startReceiving();
+    }
+
+    private void setupDefaultHandlers() {
+        registerHandler("SHUTDOWN", parts -> {
+            if (running) {
+                System.out.println("Received server shutdown signal");
+                if (onServerShutdown != null) {
+                    onServerShutdown.run();
+                }
+                stop();
+            }
+        });
+    }
+
+    public void setOnServerShutdown(Runnable callback) {
+        this.onServerShutdown = callback;
     }
 
     private void startReceiving() {
@@ -62,8 +80,12 @@ public class GameClient {
         send("POS|" + playerId + "|" + x + "|" + y);
     }
 
-    public void sendShoot(float dirX, float dirY) throws IOException {
+    public void sendShoot(float x, float y, float dirX, float dirY) throws IOException {
         send("SHOOT|" + dirX + "|" + dirY);
+    }
+
+    public void sendDeath() throws IOException {
+        send("DEATH");
     }
 
     public void sendDamage(String shooterId, int damage) throws IOException {
@@ -72,6 +94,10 @@ public class GameClient {
 
     public void sendRespawn() throws IOException {
         send("RESPAWN");
+    }
+
+    public void sendDisconnect() throws IOException {
+        send("DISCONNECT");
     }
 
     private void send(String message) throws IOException {
@@ -85,6 +111,13 @@ public class GameClient {
     }
 
     public void stop() {
+        try {
+            if (running) {
+                sendDisconnect();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
         running = false;
         socket.close();
     }

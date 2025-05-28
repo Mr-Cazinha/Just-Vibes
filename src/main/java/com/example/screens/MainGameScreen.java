@@ -47,6 +47,12 @@ public class MainGameScreen implements Screen {
 
         try {
             this.client = new GameClient(serverIp);
+            this.client.setOnServerShutdown(() -> {
+                Gdx.app.postRunnable(() -> {
+                    Gdx.app.log("MainGameScreen", "Server shutdown received, exiting game");
+                    game.exit(); // Add this method to MyGame
+                });
+            });
             setupNetworkHandlers();
             Gdx.app.log("MainGameScreen", "Sending JOIN request to server");
             client.sendJoin();
@@ -177,6 +183,18 @@ public class MainGameScreen implements Screen {
                 }
             });
         });
+
+        client.registerHandler("DISCONNECT", parts -> {
+            if (parts.length < 2) return;
+            String playerId = parts[1];
+            
+            Gdx.app.postRunnable(() -> {
+                if (!playerId.equals(localPlayerId)) {
+                    players.remove(playerId);
+                    Gdx.app.log("MainGameScreen", "Player disconnected: " + playerId);
+                }
+            });
+        });
     }
 
     private void updatePlayerState(Player player, float x, float y, float dirX, float dirY, int health, boolean isDead) {
@@ -266,7 +284,7 @@ public class MainGameScreen implements Screen {
         if (localPlayer == null) return;
         
         try {
-            client.sendShoot(localPlayer.direction.x, localPlayer.direction.y);
+            client.sendShoot(localPlayer.position.x, localPlayer.position.y, localPlayer.direction.x, localPlayer.direction.y);
             bullets.add(new Bullet(localPlayerId,
                 localPlayer.position.x,
                 localPlayer.position.y,
@@ -308,12 +326,20 @@ public class MainGameScreen implements Screen {
                     player.takeDamage(BULLET_DAMAGE);
                     bullet.active = false;
                     
-                    // If this is our player, notify server about damage
+                    // If this is our player and they died, notify server
                     if (player == localPlayer) {
-                        try {
-                            client.sendDamage(String.valueOf(bullet.shooterId), BULLET_DAMAGE);
-                        } catch (IOException e) {
-                            Gdx.app.error("MainGameScreen", "Failed to send damage", e);
+                        if (player.getHealth() <= 0) {
+                            try {
+                                client.sendDeath();
+                            } catch (IOException e) {
+                                Gdx.app.error("MainGameScreen", "Failed to send death notification", e);
+                            }
+                        } else {
+                            try {
+                                client.sendDamage(String.valueOf(bullet.shooterId), BULLET_DAMAGE);
+                            } catch (IOException e) {
+                                Gdx.app.error("MainGameScreen", "Failed to send damage", e);
+                            }
                         }
                     }
                 }
@@ -322,24 +348,15 @@ public class MainGameScreen implements Screen {
     }
 
     private void updateRespawnTimer(float delta) {
+        // Remove local respawn timer as it's now handled by the server
         if (localPlayer != null && localPlayer.isDead()) {
-            respawnCooldown -= delta;
-            if (respawnCooldown <= 0) {
-                respawnPlayer();
-            }
+            // Display "Waiting to respawn..." message or similar UI feedback
+            // This could be added in the render method
         }
     }
 
     private void respawnPlayer() {
-        if (localPlayer == null || !localPlayer.isDead()) return;
-        
-        try {
-            // Request respawn from server
-            client.sendRespawn();
-            respawnCooldown = RESPAWN_DELAY;
-        } catch (IOException e) {
-            Gdx.app.error("MainGameScreen", "Failed to send respawn request", e);
-        }
+        // Remove local respawn handling as it's now managed by the server
     }
 
     private void updateBullets(float delta) {
@@ -358,8 +375,12 @@ public class MainGameScreen implements Screen {
 
     @Override
     public void dispose() {
-        shapeRenderer.dispose();
-        client.stop();
+        if (client != null) {
+            client.stop(); // This will now send the disconnect message before stopping
+        }
+        if (shapeRenderer != null) {
+            shapeRenderer.dispose();
+        }
     }
 
     @Override

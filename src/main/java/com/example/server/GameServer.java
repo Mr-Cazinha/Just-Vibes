@@ -5,6 +5,7 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.Map;
 import java.util.Random;
 
@@ -13,10 +14,13 @@ public class GameServer {
     private static final int BUFFER_SIZE = 1024;
     private static final int GAME_WIDTH = 800;
     private static final int GAME_HEIGHT = 600;
+    private static final float MIN_RESPAWN_TIME = 20.0f;
+    private static final float MAX_RESPAWN_TIME = 30.0f;
     private final DatagramSocket socket;
     private final byte[] receiveBuffer = new byte[BUFFER_SIZE];
     private boolean running = true;
     private final Random random = new Random();
+    private final RespawnManager respawnManager;
 
     // Store connected players: Key = PlayerID, Value = Player Data
     private final Map<String, PlayerData> players = new ConcurrentHashMap<>();
@@ -26,6 +30,17 @@ public class GameServer {
     public GameServer() throws IOException {
         socket = new DatagramSocket(PORT);
         System.out.println("Server started on port " + PORT);
+        
+        // Initialize RespawnManager with callback
+        respawnManager = new RespawnManager(respawnData -> {
+            PlayerData player = players.get(respawnData.playerId);
+            if (player != null) {
+                float[] spawnPoint = getRandomSpawnPoint();
+                player.x = spawnPoint[0];
+                player.y = spawnPoint[1];
+                broadcastRespawn(respawnData.playerId, spawnPoint[0], spawnPoint[1]);
+            }
+        });
     }
 
     private float[] getRandomSpawnPoint() {
@@ -68,15 +83,24 @@ public class GameServer {
     public void start() {
         Thread serverThread = new Thread(this::serverLoop);
         serverThread.start();
+        respawnManager.start();
     }
 
     private void serverLoop() {
+        long lastUpdateTime = System.nanoTime();
+        
         while (running) {
             try {
-                DatagramPacket packet = new DatagramPacket(receiveBuffer, receiveBuffer.length);
-                socket.receive(packet);
-                handlePacket(packet);
-            } catch (IOException e) {
+                // Handle incoming packets
+                while (socket.getReceiveBufferSize() > 0) {
+                    DatagramPacket packet = new DatagramPacket(receiveBuffer, receiveBuffer.length);
+                    socket.receive(packet);
+                    handlePacket(packet);
+                }
+                
+                // Small sleep to prevent CPU overuse
+                Thread.sleep(16); // Roughly 60 updates per second
+            } catch (IOException | InterruptedException e) {
                 if (running) {
                     e.printStackTrace();
                 }
@@ -95,6 +119,10 @@ public class GameServer {
             handlePosition(clientKey, parts);
         } else if (parts[0].equals("SHOOT")) {
             handleShoot(clientKey, parts);
+        } else if (parts[0].equals("DEATH")) {
+            handleDeath(clientKey);
+        } else if (parts[0].equals("DISCONNECT")) {
+            handleDisconnect(clientKey);
         }
     }
 
@@ -162,10 +190,39 @@ public class GameServer {
         if (parts.length >= 3) {
             String playerId = clientToPlayerId.get(clientKey);
             if (playerId != null) {
-                float dirX = Float.parseFloat(parts[1]);
-                float dirY = Float.parseFloat(parts[2]);
-                broadcastShot(playerId, dirX, dirY);
+                PlayerData player = players.get(playerId);
+                if (player != null) {
+                    float dirX = Float.parseFloat(parts[1]);
+                    float dirY = Float.parseFloat(parts[2]);
+                    broadcastShot(playerId, player.x, player.y, dirX, dirY);
+                }
             }
+        }
+    }
+
+    private void handleDeath(String clientKey) {
+        System.out.println("Handling death for client: " + clientKey);
+        String playerId = clientToPlayerId.get(clientKey);
+        if (playerId != null) {
+            PlayerData player = players.get(playerId);
+            if (player != null) {
+                // Add player to respawn queue
+                respawnManager.addToRespawnQueue(playerId);
+                // Broadcast death to all clients
+                broadcastDeath(playerId);
+            }
+        }
+    }
+
+    private void handleDisconnect(String clientKey) {
+        String playerId = clientToPlayerId.get(clientKey);
+        if (playerId != null) {
+            // Remove from all data structures
+            players.remove(playerId);
+            clientToPlayerId.remove(clientKey);
+            
+            // Broadcast player disconnection to all other clients
+            broadcastPlayerDisconnected(playerId);
         }
     }
 
@@ -180,8 +237,24 @@ public class GameServer {
         broadcast(message, excludeKey);
     }
 
-    private void broadcastShot(String playerId, float dirX, float dirY) {
-        String message = "SHOOT|" + playerId + "|" + dirX + "|" + dirY;
+    private void broadcastShot(String playerId, float x, float y, float dirX, float dirY) {
+        String message = "SHOOT|" + playerId + "|" + x + "|" + y + "|" + dirX + "|" + dirY;
+        broadcast(message, null);
+    }
+
+    private void broadcastDeath(String playerId) {
+        PlayerData player = players.get(playerId);
+        String message = "DEATH|" + playerId;
+        broadcast(message, null);
+    }
+
+    private void broadcastPlayerDisconnected(String playerId) {
+        String message = "DISCONNECT|" + playerId;
+        broadcast(message, null);
+    }
+
+    private void broadcastRespawn(String playerId, float x, float y) {
+        String message = "RESPAWN|" + playerId + "|" + x + "|" + y;
         broadcast(message, null);
     }
 
@@ -201,8 +274,22 @@ public class GameServer {
     }
 
     public void stop() {
-        running = false;
-        socket.close();
+        if (running) {
+            System.out.println("Server shutting down...");
+            // Send shutdown message to all clients
+            try {
+                String message = "SHUTDOWN";
+                broadcast(message, null);
+                // Give clients a small window to receive the shutdown message
+                Thread.sleep(100);
+            } catch (Exception e) {
+                System.err.println("Error during shutdown: " + e.getMessage());
+            }
+            running = false;
+            respawnManager.stop();
+            socket.close();
+            System.out.println("Server stopped.");
+        }
     }
 
     public static void main(String[] args) {
