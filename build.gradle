@@ -21,6 +21,8 @@ dependencies {
     implementation "com.badlogicgames.gdx:gdx-box2d:$gdxVersion"
     implementation "com.badlogicgames.gdx:gdx-box2d-platform:$gdxVersion:natives-desktop"
     
+    implementation 'org.json:json:20231013'
+    
     testImplementation 'junit:junit:4.13.2'
 }
 

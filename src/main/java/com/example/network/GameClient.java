@@ -7,6 +7,8 @@ import java.net.InetAddress;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 import java.util.function.Consumer;
+import org.json.JSONObject;
+import org.json.JSONException;
 
 public class GameClient {
     private static final int SERVER_PORT = 7777;
@@ -18,6 +20,7 @@ public class GameClient {
     private Runnable onServerShutdown;
 
     private final Map<String, Consumer<String[]>> messageHandlers = new ConcurrentHashMap<>();
+    private final Map<String, Consumer<JSONObject>> jsonMessageHandlers = new ConcurrentHashMap<>();
 
     public GameClient(String serverHost) throws IOException {
         socket = new DatagramSocket();
@@ -29,7 +32,6 @@ public class GameClient {
     private void setupDefaultHandlers() {
         registerHandler("SHUTDOWN", parts -> {
             if (running) {
-                System.out.println("Received server shutdown signal");
                 if (onServerShutdown != null) {
                     onServerShutdown.run();
                 }
@@ -55,7 +57,7 @@ public class GameClient {
                 handlePacket(packet);
             } catch (IOException e) {
                 if (running) {
-                    e.printStackTrace();
+                    // Silent fail
                 }
             }
         }
@@ -63,12 +65,23 @@ public class GameClient {
 
     private void handlePacket(DatagramPacket packet) {
         String message = new String(packet.getData(), 0, packet.getLength());
-        String[] parts = message.split("\\|");
-        String messageType = parts[0];
+        
+        try {
+            JSONObject json = new JSONObject(message);
+            String type = json.getString("type");
+            Consumer<JSONObject> handler = jsonMessageHandlers.get(type);
+            if (handler != null) {
+                handler.accept(json);
+                return;
+            }
+        } catch (JSONException e) {
+            String[] parts = message.split("\\|");
+            String messageType = parts[0];
 
-        Consumer<String[]> handler = messageHandlers.get(messageType);
-        if (handler != null) {
-            handler.accept(parts);
+            Consumer<String[]> handler = messageHandlers.get(messageType);
+            if (handler != null) {
+                handler.accept(parts);
+            }
         }
     }
 
@@ -110,13 +123,17 @@ public class GameClient {
         messageHandlers.put(messageType, handler);
     }
 
+    public void registerJsonHandler(String messageType, Consumer<JSONObject> handler) {
+        jsonMessageHandlers.put(messageType, handler);
+    }
+
     public void stop() {
         try {
             if (running) {
                 sendDisconnect();
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            // Silent fail
         }
         running = false;
         socket.close();

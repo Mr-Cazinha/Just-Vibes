@@ -8,6 +8,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.Map;
 import java.util.Random;
+import org.json.JSONObject;
 
 public class GameServer {
     private static final int PORT = 7777;
@@ -21,6 +22,7 @@ public class GameServer {
     private boolean running = true;
     private final Random random = new Random();
     private final RespawnManager respawnManager;
+    private final ScoreManager scoreManager;
 
     // Store connected players: Key = PlayerID, Value = Player Data
     private final Map<String, PlayerData> players = new ConcurrentHashMap<>();
@@ -41,6 +43,7 @@ public class GameServer {
                 broadcastRespawn(respawnData.playerId, spawnPoint[0], spawnPoint[1]);
             }
         });
+        this.scoreManager = new ScoreManager();
     }
 
     private float[] getRandomSpawnPoint() {
@@ -102,7 +105,7 @@ public class GameServer {
                 Thread.sleep(16); // Roughly 60 updates per second
             } catch (IOException | InterruptedException e) {
                 if (running) {
-                    e.printStackTrace();
+                    // Silent fail
                 }
             }
         }
@@ -156,6 +159,8 @@ public class GameServer {
         
         // Broadcast new player to all others
         broadcastPlayerJoined(playerId);
+        scoreManager.addPlayer(playerId);
+        broadcastScores();
     }
 
     private void sendToClient(String message, InetAddress address, int port) {
@@ -164,7 +169,7 @@ public class GameServer {
             DatagramPacket packet = new DatagramPacket(buffer, buffer.length, address, port);
             socket.send(packet);
         } catch (IOException e) {
-            e.printStackTrace();
+            // Silent fail
         }
     }
 
@@ -210,6 +215,22 @@ public class GameServer {
                 respawnManager.addToRespawnQueue(playerId);
                 // Broadcast death to all clients
                 broadcastDeath(playerId);
+                scoreManager.addKill(playerId);
+                broadcastScores();
+                
+                if (scoreManager.hasWinner()) {
+                    broadcastGameOver(scoreManager.getWinner());
+                    // Reset after a delay
+                    new Thread(() -> {
+                        try {
+                            Thread.sleep(5000);
+                            scoreManager.reset();
+                            broadcastScores();
+                        } catch (InterruptedException e) {
+                            // Silent fail
+                        }
+                    }).start();
+                }
             }
         }
     }
@@ -223,6 +244,8 @@ public class GameServer {
             
             // Broadcast player disconnection to all other clients
             broadcastPlayerDisconnected(playerId);
+            scoreManager.removePlayer(playerId);
+            broadcastScores();
         }
     }
 
@@ -258,6 +281,21 @@ public class GameServer {
         broadcast(message, null);
     }
 
+    private void broadcastScores() {
+        JSONObject message = new JSONObject();
+        message.put("type", "scores");
+        message.put("scores", new JSONObject(scoreManager.getScores()));
+        message.put("winner", scoreManager.getWinner());
+        broadcast(message.toString(), null);
+    }
+
+    private void broadcastGameOver(String winnerId) {
+        JSONObject message = new JSONObject();
+        message.put("type", "gameOver");
+        message.put("winner", winnerId);
+        broadcast(message.toString(), null);
+    }
+
     private void broadcast(String message, String excludeKey) {
         byte[] buffer = message.getBytes();
         players.forEach((key, player) -> {
@@ -267,7 +305,7 @@ public class GameServer {
                         buffer, buffer.length, player.address, player.port);
                     socket.send(packet);
                 } catch (IOException e) {
-                    e.printStackTrace();
+                    // Silent fail
                 }
             }
         });
@@ -283,7 +321,7 @@ public class GameServer {
                 // Give clients a small window to receive the shutdown message
                 Thread.sleep(100);
             } catch (Exception e) {
-                System.err.println("Error during shutdown: " + e.getMessage());
+                // Silent fail
             }
             running = false;
             respawnManager.stop();
@@ -297,7 +335,7 @@ public class GameServer {
             GameServer server = new GameServer();
             server.start();
         } catch (IOException e) {
-            e.printStackTrace();
+            // Silent fail
         }
     }
 
