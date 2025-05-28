@@ -58,8 +58,8 @@ public class GameClient {
         send("JOIN");
     }
 
-    public void sendPosition(float x, float y) throws IOException {
-        send("POS|" + x + "|" + y);
+    public void sendPosition(String playerId, float x, float y) throws IOException {
+        send("POS|" + playerId + "|" + x + "|" + y);
     }
 
     public void sendShoot(float dirX, float dirY) throws IOException {

@@ -67,12 +67,25 @@ public class MainGameScreen implements Screen {
             float y = Float.parseFloat(parts[3]);
             
             Gdx.app.postRunnable(() -> {
-                Gdx.app.log("MainGameScreen", "Received JOIN response. Creating local player with ID: " + playerId);
-                localPlayerId = playerId;
-                localPlayer = new Player(playerId, x, y, true);
-                players.put(playerId, localPlayer);
-                isConnected = true;
-                Gdx.app.log("MainGameScreen", "Local player added to players map. Total players: " + players.size());
+                // If we don't have a local player yet and we're not connected, this is our JOIN response
+                if (localPlayer == null && !isConnected) {
+                    Gdx.app.log("MainGameScreen", "Received initial JOIN response. Creating local player with ID: " + playerId);
+                    localPlayerId = playerId;
+                    localPlayer = new Player(playerId, x, y, true);
+                    players.put(playerId, localPlayer);
+                    isConnected = true;
+                    Gdx.app.log("MainGameScreen", "Local player initialized. Position: " + x + ", " + y);
+                } else if (!playerId.equals(localPlayerId)) {
+                    // This is another player joining
+                    Gdx.app.log("MainGameScreen", "New remote player joined with ID: " + playerId);
+                    if (!players.containsKey(playerId)) {
+                        Player newPlayer = new Player(playerId, x, y, false);
+                        players.put(playerId, newPlayer);
+                        Gdx.app.log("MainGameScreen", "Added remote player. Position: " + x + ", " + y);
+                    }
+                }
+                Gdx.app.debug("MainGameScreen", "Total players: " + players.size() + 
+                    ", Local player: " + (localPlayer != null ? localPlayer.id : "null"));
             });
         });
 
@@ -107,10 +120,11 @@ public class MainGameScreen implements Screen {
             float x = Float.parseFloat(parts[2]);
             float y = Float.parseFloat(parts[3]);
             
+            // Only process position updates for other players
             if (!playerId.equals(localPlayerId)) {
                 Gdx.app.postRunnable(() -> {
                     Player player = players.get(playerId);
-                    if (player != null) {
+                    if (player != null && !player.isLocal()) {
                         player.updateNetworkPosition(x, y);
                     }
                 });
@@ -200,39 +214,67 @@ public class MainGameScreen implements Screen {
     }
 
     private void updateGameState(float delta) {
-        handleInput(delta);
-        updateBullets(delta);
-        updateRespawnTimer(delta);
-        
-        // Update all players
-        for (Player player : players.values()) {
-            if (player != null) {
-                if (player.isLocal()) {
-                    float moveX = 0, moveY = 0;
-                    if (Gdx.input.isKeyPressed(Keys.A)) moveX -= 1;
-                    if (Gdx.input.isKeyPressed(Keys.D)) moveX += 1;
-                    if (Gdx.input.isKeyPressed(Keys.W)) moveY += 1;
-                    if (Gdx.input.isKeyPressed(Keys.S)) moveY -= 1;
+        // Only handle input for local player
+        if (localPlayer != null && !localPlayer.isDead()) {
+            float moveX = 0, moveY = 0;
+            if (Gdx.input.isKeyPressed(Keys.A)) moveX -= 1;
+            if (Gdx.input.isKeyPressed(Keys.D)) moveX += 1;
+            if (Gdx.input.isKeyPressed(Keys.W)) moveY += 1;
+            if (Gdx.input.isKeyPressed(Keys.S)) moveY -= 1;
 
-                    // Normalize diagonal movement
-                    if (moveX != 0 && moveY != 0) {
-                        float length = (float) Math.sqrt(moveX * moveX + moveY * moveY);
-                        moveX /= length;
-                        moveY /= length;
-                    }
-
-                    player.update(delta, moveX, moveY);
-                } else {
-                    player.update(delta, 0, 0); // Update network interpolation
+            // Normalize diagonal movement
+            if (moveX != 0 || moveY != 0) {
+                float length = (float) Math.sqrt(moveX * moveX + moveY * moveY);
+                moveX /= length;
+                moveY /= length;
+                
+                // Update local player position
+                localPlayer.update(delta, moveX, moveY);
+                
+                // Send position update
+                try {
+                    client.sendPosition(localPlayer.id, localPlayer.position.x, localPlayer.position.y);
+                } catch (IOException e) {
+                    Gdx.app.error("MainGameScreen", "Failed to send position update", e);
                 }
+            }
+
+            // Handle shooting
+            if (Gdx.input.isKeyPressed(Keys.SPACE) && shootCooldown <= 0) {
+                shoot();
+            }
+        }
+
+        // Update all non-local players (network interpolation)
+        for (Player player : players.values()) {
+            if (player != null && !player.isLocal()) {
+                player.update(delta, 0, 0); // Only update interpolation
             }
         }
         
+        updateBullets(delta);
+        updateRespawnTimer(delta);
         checkCollisions();
 
         // Update shoot cooldown
         if (shootCooldown > 0) {
             shootCooldown -= delta;
+        }
+    }
+
+    private void shoot() {
+        if (localPlayer == null) return;
+        
+        try {
+            client.sendShoot(localPlayer.direction.x, localPlayer.direction.y);
+            bullets.add(new Bullet(localPlayerId,
+                localPlayer.position.x,
+                localPlayer.position.y,
+                localPlayer.direction.x,
+                localPlayer.direction.y));
+            shootCooldown = SHOOT_DELAY;
+        } catch (IOException e) {
+            Gdx.app.error("MainGameScreen", "Failed to send shoot command", e);
         }
     }
 
@@ -297,57 +339,6 @@ public class MainGameScreen implements Screen {
             respawnCooldown = RESPAWN_DELAY;
         } catch (IOException e) {
             Gdx.app.error("MainGameScreen", "Failed to send respawn request", e);
-        }
-    }
-
-    private void handleInput(float delta) {
-        if (localPlayer == null || localPlayer.isDead()) return;
-
-        // Movement
-        float moveX = 0, moveY = 0;
-        if (Gdx.input.isKeyPressed(Keys.A)) moveX -= 1;
-        if (Gdx.input.isKeyPressed(Keys.D)) moveX += 1;
-        if (Gdx.input.isKeyPressed(Keys.W)) moveY += 1;
-        if (Gdx.input.isKeyPressed(Keys.S)) moveY -= 1;
-
-        // Normalize diagonal movement
-        if (moveX != 0 && moveY != 0) {
-            float length = (float) Math.sqrt(moveX * moveX + moveY * moveY);
-            moveX /= length;
-            moveY /= length;
-        }
-
-        // Update player movement and direction
-        localPlayer.update(delta, moveX, moveY);
-        
-        // Send position update if moving
-        if (moveX != 0 || moveY != 0) {
-            try {
-                client.sendPosition(localPlayer.position.x, localPlayer.position.y);
-            } catch (IOException e) {
-                Gdx.app.error("MainGameScreen", "Failed to send position", e);
-            }
-        }
-
-        // Shooting
-        if (Gdx.input.isKeyPressed(Keys.SPACE) && shootCooldown <= 0) {
-            shoot();
-        }
-    }
-
-    private void shoot() {
-        if (localPlayer == null) return;
-        
-        try {
-            client.sendShoot(localPlayer.direction.x, localPlayer.direction.y);
-            bullets.add(new Bullet(localPlayerId,
-                localPlayer.position.x,
-                localPlayer.position.y,
-                localPlayer.direction.x,
-                localPlayer.direction.y));
-            shootCooldown = SHOOT_DELAY;
-        } catch (IOException e) {
-            Gdx.app.error("MainGameScreen", "Failed to send shoot command", e);
         }
     }
 

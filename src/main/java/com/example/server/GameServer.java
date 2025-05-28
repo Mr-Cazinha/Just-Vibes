@@ -18,8 +18,10 @@ public class GameServer {
     private boolean running = true;
     private final Random random = new Random();
 
-    // Store connected players: Key = IP:Port, Value = Player Data
+    // Store connected players: Key = PlayerID, Value = Player Data
     private final Map<String, PlayerData> players = new ConcurrentHashMap<>();
+    // Map to store client address to player ID mapping
+    private final Map<String, String> clientToPlayerId = new ConcurrentHashMap<>();
 
     public GameServer() throws IOException {
         socket = new DatagramSocket(PORT);
@@ -96,22 +98,36 @@ public class GameServer {
         }
     }
 
+    private String generatePlayerId(String clientKey) {
+        // Generate a random number between 1000 and 9999
+        int randomNum = 1000 + random.nextInt(9000);
+        return clientKey + "_" + randomNum;
+    }
+
     private void handleJoin(String clientKey, InetAddress address, int port) {
         float[] spawnPoint = getRandomSpawnPoint();
+        String playerId = generatePlayerId(clientKey);
+        
         PlayerData newPlayer = new PlayerData(address, port, spawnPoint[0], spawnPoint[1]);
-        players.put(clientKey, newPlayer);
+        players.put(playerId, newPlayer);
+        clientToPlayerId.put(clientKey, playerId);
+        
+        // Send the new player their ID and spawn position
+        String initialMessage = "JOIN|" + playerId + "|" + spawnPoint[0] + "|" + spawnPoint[1];
+        sendToClient(initialMessage, address, port);
         
         // Notify new player about existing players
         for (Map.Entry<String, PlayerData> entry : players.entrySet()) {
-            if (!entry.getKey().equals(clientKey)) {
+            String existingPlayerId = entry.getKey();
+            if (!existingPlayerId.equals(playerId)) {
                 PlayerData existingPlayer = entry.getValue();
-                String joinMessage = "JOIN|" + entry.getKey() + "|" + existingPlayer.x + "|" + existingPlayer.y;
+                String joinMessage = "JOIN|" + existingPlayerId + "|" + existingPlayer.x + "|" + existingPlayer.y;
                 sendToClient(joinMessage, address, port);
             }
         }
         
-        // Broadcast new player to all
-        broadcastPlayerJoined(clientKey);
+        // Broadcast new player to all others
+        broadcastPlayerJoined(playerId);
     }
 
     private void sendToClient(String message, InetAddress address, int port) {
@@ -125,39 +141,47 @@ public class GameServer {
     }
 
     private void handlePosition(String clientKey, String[] parts) {
-        if (parts.length >= 3) {
-            float x = Float.parseFloat(parts[1]);
-            float y = Float.parseFloat(parts[2]);
-            PlayerData player = players.get(clientKey);
+        if (parts.length < 4) return;
+        String playerId = parts[1];
+        float x = Float.parseFloat(parts[2]);
+        float y = Float.parseFloat(parts[3]);
+        
+        String senderPlayerId = clientToPlayerId.get(clientKey);
+        if (senderPlayerId != null && senderPlayerId.equals(playerId)) {
+            PlayerData player = players.get(playerId);
             if (player != null) {
                 player.x = x;
                 player.y = y;
-                broadcastPlayerPosition(clientKey, x, y);
+                // Broadcast to all players except the sender
+                broadcastPlayerPosition(playerId, x, y, clientKey);
             }
         }
     }
 
     private void handleShoot(String clientKey, String[] parts) {
         if (parts.length >= 3) {
-            float dirX = Float.parseFloat(parts[1]);
-            float dirY = Float.parseFloat(parts[2]);
-            broadcastShot(clientKey, dirX, dirY);
+            String playerId = clientToPlayerId.get(clientKey);
+            if (playerId != null) {
+                float dirX = Float.parseFloat(parts[1]);
+                float dirY = Float.parseFloat(parts[2]);
+                broadcastShot(playerId, dirX, dirY);
+            }
         }
     }
 
-    private void broadcastPlayerJoined(String clientKey) {
-        PlayerData player = players.get(clientKey);
-        String message = "JOIN|" + clientKey + "|" + player.x + "|" + player.y;
+    private void broadcastPlayerJoined(String playerId) {
+        PlayerData player = players.get(playerId);
+        String message = "JOIN|" + playerId + "|" + player.x + "|" + player.y;
         broadcast(message, null);
     }
 
-    private void broadcastPlayerPosition(String clientKey, float x, float y) {
-        String message = "POS|" + clientKey + "|" + x + "|" + y;
-        broadcast(message, null);
+    private void broadcastPlayerPosition(String playerId, float x, float y, String excludeKey) {
+        String message = "POS|" + playerId + "|" + x + "|" + y;
+        broadcast(message, excludeKey);
     }
 
-    private void broadcastShot(String clientKey, float dirX, float dirY) {
-        String message = "SHOOT|" + clientKey + "|" + dirX + "|" + dirY;
+    private void broadcastShot(String playerId, float dirX, float dirY) {
+        String message = "SHOOT|" + playerId + "|" + dirX + "|" + dirY;
         broadcast(message, null);
     }
 
