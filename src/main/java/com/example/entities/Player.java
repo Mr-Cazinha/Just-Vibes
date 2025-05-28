@@ -21,6 +21,7 @@ public class Player {
     private static final int MAX_HEALTH = 100;
     private boolean isDead;
     private boolean isLocal;
+    @SuppressWarnings("unused")
     private float lastUpdateTime;
     private static final float NETWORK_INTERPOLATION = 0.1f;
     private Vector2 targetPosition;

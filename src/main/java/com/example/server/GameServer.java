@@ -5,7 +5,7 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
+
 import java.util.Map;
 import java.util.Random;
 import org.json.JSONObject;
@@ -15,7 +15,9 @@ public class GameServer {
     private static final int BUFFER_SIZE = 1024;
     private static final int GAME_WIDTH = 800;
     private static final int GAME_HEIGHT = 600;
+    @SuppressWarnings("unused")
     private static final float MIN_RESPAWN_TIME = 20.0f;
+    @SuppressWarnings("unused")
     private static final float MAX_RESPAWN_TIME = 30.0f;
     private final DatagramSocket socket;
     private final byte[] receiveBuffer = new byte[BUFFER_SIZE];
@@ -90,6 +92,7 @@ public class GameServer {
     }
 
     private void serverLoop() {
+        @SuppressWarnings("unused")
         long lastUpdateTime = System.nanoTime();
         
         while (running) {
@@ -266,6 +269,7 @@ public class GameServer {
     }
 
     private void broadcastDeath(String playerId) {
+        @SuppressWarnings("unused")
         PlayerData player = players.get(playerId);
         String message = "DEATH|" + playerId;
         broadcast(message, null);

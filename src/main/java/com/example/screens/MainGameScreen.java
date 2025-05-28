@@ -7,7 +7,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer.ShapeType;
-import com.badlogic.gdx.math.Vector2;
+
 import com.example.MyGame;
 import com.example.entities.Player;
 import com.example.entities.Bullet;
@@ -33,8 +33,10 @@ public class MainGameScreen implements Screen {
     private Player localPlayer;
     private String localPlayerId;
     private float shootCooldown = 0;
+    @SuppressWarnings("unused")
     private float respawnCooldown = 0;
     private static final float SHOOT_DELAY = 0.5f;
+    @SuppressWarnings("unused")
     private static final float RESPAWN_DELAY = 3.0f;
     private static final int BULLET_DAMAGE = 20;
     private boolean isConnected = false;
