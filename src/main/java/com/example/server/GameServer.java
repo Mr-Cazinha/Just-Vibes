@@ -163,7 +163,19 @@ public class GameServer {
         // Broadcast new player to all others
         broadcastPlayerJoined(playerId);
         scoreManager.addPlayer(playerId);
-        broadcastScores();
+        
+        // Broadcast scores to existing players immediately
+        broadcastScoresToAllExcept(playerId);
+        
+        // Send scores to the new player after a delay to ensure they're ready
+        new Thread(() -> {
+            try {
+                Thread.sleep(1000); // Wait 1 second
+                sendScoresToPlayer(playerId);
+            } catch (InterruptedException e) {
+                // Silent fail
+            }
+        }).start();
     }
 
     private void sendToClient(String message, InetAddress address, int port) {
@@ -313,6 +325,25 @@ public class GameServer {
                 }
             }
         });
+    }
+
+    private void broadcastScoresToAllExcept(String excludedPlayerId) {
+        JSONObject message = new JSONObject();
+        message.put("type", "scores");
+        message.put("scores", new JSONObject(scoreManager.getScores()));
+        message.put("winner", scoreManager.getWinner());
+        broadcast(message.toString(), excludedPlayerId);
+    }
+
+    private void sendScoresToPlayer(String playerId) {
+        PlayerData player = players.get(playerId);
+        if (player != null) {
+            JSONObject message = new JSONObject();
+            message.put("type", "scores");
+            message.put("scores", new JSONObject(scoreManager.getScores()));
+            message.put("winner", scoreManager.getWinner());
+            sendToClient(message.toString(), player.address, player.port);
+        }
     }
 
     public void stop() {
