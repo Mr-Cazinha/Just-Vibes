@@ -1,6 +1,7 @@
 package com.example.screens;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Input.Keys;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.GL20;
@@ -20,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Iterator;
 
 public class MainGameScreen implements Screen {
     private final MyGame game;
@@ -41,6 +43,9 @@ public class MainGameScreen implements Screen {
     private static final int BULLET_DAMAGE = 20;
     private boolean isConnected = false;
     private float connectionTimeout = 5.0f;
+    private final Map<String, String> bulletOwners = new ConcurrentHashMap<>();
+    private float playerUpdateTimer = 0;
+    private static final float PLAYER_UPDATE_INTERVAL = 0.1f; // 10 times per second
 
     public MainGameScreen(MyGame game, String serverIp) {
         this.game = game;
@@ -125,12 +130,13 @@ public class MainGameScreen implements Screen {
         });
 
         client.registerHandler("SHOOT", parts -> {
-            if (parts.length < 6) return;
+            if (parts.length < 7) return;
             String playerId = parts[1];
             float x = Float.parseFloat(parts[2]);
             float y = Float.parseFloat(parts[3]);
             float dirX = Float.parseFloat(parts[4]);
             float dirY = Float.parseFloat(parts[5]);
+            String bulletId = parts[6];
             
             if (!playerId.equals(localPlayerId)) {
                 Gdx.app.postRunnable(() -> {
@@ -138,7 +144,9 @@ public class MainGameScreen implements Screen {
                     if (shooter != null) {
                         shooter.position.set(x, y);
                         shooter.direction.set(dirX, dirY).nor();
-                        bullets.add(new Bullet(playerId, x, y, dirX, dirY));
+                        Bullet bullet = new Bullet(playerId, x, y, dirX, dirY);
+                        bullets.add(bullet);
+                        bulletOwners.put(bulletId, playerId);
                     }
                 });
             }
@@ -213,61 +221,71 @@ public class MainGameScreen implements Screen {
     }
 
     private void updateGameState(float delta) {
-        if (localPlayer != null && !localPlayer.isDead()) {
-            float moveX = 0, moveY = 0;
-            if (Gdx.input.isKeyPressed(Keys.A)) moveX -= 1;
-            if (Gdx.input.isKeyPressed(Keys.D)) moveX += 1;
-            if (Gdx.input.isKeyPressed(Keys.W)) moveY += 1;
-            if (Gdx.input.isKeyPressed(Keys.S)) moveY -= 1;
+        if (!isConnected) return;
 
-            if (moveX != 0 || moveY != 0) {
-                float length = (float) Math.sqrt(moveX * moveX + moveY * moveY);
-                moveX /= length;
-                moveY /= length;
-                
-                localPlayer.update(delta, moveX, moveY);
-                
-                try {
-                    client.sendPosition(localPlayer.id, localPlayer.position.x, localPlayer.position.y);
-                } catch (IOException e) {
-                    // Silent fail
-                }
-            }
-
-            if (Gdx.input.isKeyPressed(Keys.SPACE) && shootCooldown <= 0) {
-                shoot();
-            }
-        }
-
-        for (Player player : players.values()) {
-            if (player != null && !player.isLocal()) {
-                player.update(delta, 0, 0);
-            }
-        }
-        
+        handleInput(delta);
         updateBullets(delta);
-        updateRespawnTimer(delta);
-        checkCollisions();
-
-        if (shootCooldown > 0) {
-            shootCooldown -= delta;
+        updatePlayers(delta);
+        
+        // Periodic check for missing players
+        playerUpdateTimer += delta;
+        if (playerUpdateTimer >= PLAYER_UPDATE_INTERVAL) {
+            playerUpdateTimer = 0;
+            checkMissingPlayers();
         }
     }
 
-    private void shoot() {
-        if (localPlayer == null) return;
-        
-        try {
-            client.sendShoot(localPlayer.position.x, localPlayer.position.y, localPlayer.direction.x, localPlayer.direction.y);
-            bullets.add(new Bullet(localPlayerId,
-                localPlayer.position.x,
-                localPlayer.position.y,
-                localPlayer.direction.x,
-                localPlayer.direction.y));
-            shootCooldown = SHOOT_DELAY;
-        } catch (IOException e) {
-            // Silent fail
+    private void handleInput(float delta) {
+        if (localPlayer == null || localPlayer.isDead()) return;
+
+        float moveX = 0, moveY = 0;
+        if (Gdx.input.isKeyPressed(Keys.A)) moveX -= 1;
+        if (Gdx.input.isKeyPressed(Keys.D)) moveX += 1;
+        if (Gdx.input.isKeyPressed(Keys.W)) moveY += 1;
+        if (Gdx.input.isKeyPressed(Keys.S)) moveY -= 1;
+
+        if (moveX != 0 || moveY != 0) {
+            float length = (float) Math.sqrt(moveX * moveX + moveY * moveY);
+            moveX /= length;
+            moveY /= length;
+            
+            localPlayer.update(delta, moveX, moveY);
+            
+            try {
+                client.sendPosition(localPlayer.id, localPlayer.position.x, localPlayer.position.y);
+            } catch (IOException e) {
+                // Silent fail
+            }
         }
+
+        // Shooting
+        if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && shootCooldown <= 0) {
+            float mouseX = Gdx.input.getX();
+            float mouseY = Gdx.graphics.getHeight() - Gdx.input.getY();
+            
+            // Calculate direction
+            float dirX = mouseX - localPlayer.position.x;
+            float dirY = mouseY - localPlayer.position.y;
+            float length = (float) Math.sqrt(dirX * dirX + dirY * dirY);
+            dirX /= length;
+            dirY /= length;
+            
+            // Create bullet and send shoot message
+            Bullet bullet = new Bullet(localPlayerId, localPlayer.position.x, localPlayer.position.y, dirX, dirY);
+            bullets.add(bullet);
+            String bulletId = localPlayerId + "_" + System.currentTimeMillis();
+            bulletOwners.put(bulletId, localPlayerId);
+            
+            try {
+                client.sendShoot(localPlayer.position.x, localPlayer.position.y, dirX, dirY);
+            } catch (IOException e) {
+                Gdx.app.error("MainGameScreen", "Failed to send shoot message", e);
+            }
+            
+            shootCooldown = SHOOT_DELAY;
+        }
+        
+        shootCooldown -= delta;
     }
 
     private void renderGameElements() {
@@ -291,27 +309,21 @@ public class MainGameScreen implements Screen {
     }
 
     private void checkCollisions() {
-        for (Bullet bullet : bullets) {
-            for (Player player : players.values()) {
-                if (player.checkBulletCollision(bullet)) {
-                    player.takeDamage(BULLET_DAMAGE);
-                    bullet.active = false;
-                    
-                    if (player == localPlayer) {
-                        if (player.getHealth() <= 0) {
-                            try {
-                                client.sendDeath();
-                            } catch (IOException e) {
-                                // Silent fail
-                            }
-                        } else {
-                            try {
-                                client.sendDamage(String.valueOf(bullet.shooterId), BULLET_DAMAGE);
-                            } catch (IOException e) {
-                                // Silent fail
-                            }
-                        }
+        if (localPlayer == null || localPlayer.isDead()) return;
+        
+        for (Player player : players.values()) {
+            if (player == null || player.isDead() || player.getId().equals(localPlayerId)) continue;
+            
+            // Check bullet collisions
+            for (Bullet bullet : bullets) {
+                if (bullet.checkCollision(player)) {
+                    try {
+                        String bulletId = bullet.getOwnerId() + "_" + System.currentTimeMillis();
+                        client.sendDamage(bulletId, BULLET_DAMAGE);
+                    } catch (IOException e) {
+                        Gdx.app.error("MainGameScreen", "Failed to send damage", e);
                     }
+                    bullet.active = false;
                 }
             }
         }
@@ -319,15 +331,63 @@ public class MainGameScreen implements Screen {
 
     private void updateRespawnTimer(float delta) {
         if (localPlayer != null && localPlayer.isDead()) {
-            // Server handles respawn
+            respawnCooldown -= delta;
+            if (respawnCooldown <= 0) {
+                try {
+                    client.sendRespawn();
+                    respawnCooldown = RESPAWN_DELAY;
+                } catch (IOException e) {
+                    Gdx.app.error("MainGameScreen", "Failed to send respawn", e);
+                }
+            }
         }
     }
 
     private void updateBullets(float delta) {
-        bullets.removeIf(bullet -> {
+        Iterator<Bullet> bulletIterator = bullets.iterator();
+        while (bulletIterator.hasNext()) {
+            Bullet bullet = bulletIterator.next();
             bullet.update(delta);
-            return bullet.isOutOfBounds(800, 600) || !bullet.active;
-        });
+
+            // Check for bullet collisions with players
+            for (Player player : players.values()) {
+                if (!player.isDead() && bullet.checkCollision(player)) {
+                    String bulletId = bullet.getOwnerId() + "_" + System.currentTimeMillis();
+                    try {
+                        client.sendDamage(bulletId, BULLET_DAMAGE);
+                    } catch (IOException e) {
+                        Gdx.app.error("MainGameScreen", "Failed to send damage", e);
+                    }
+                    bulletIterator.remove();
+                    break;
+                }
+            }
+
+            // Remove bullets that are out of bounds
+            if (bullet.isOutOfBounds(800, 600)) {
+                bulletIterator.remove();
+            }
+        }
+    }
+
+    private void updatePlayers(float delta) {
+        for (Player player : players.values()) {
+            if (player != null && !player.isLocal()) {
+                player.update(delta, 0, 0);
+            }
+        }
+        
+        updateRespawnTimer(delta);
+        checkCollisions();
+    }
+
+    private void checkMissingPlayers() {
+        try {
+            // Request current player list from server
+            client.sendPosition(localPlayerId, localPlayer.position.x, localPlayer.position.y);
+        } catch (IOException e) {
+            Gdx.app.error("MainGameScreen", "Failed to request player update", e);
+        }
     }
 
     @Override

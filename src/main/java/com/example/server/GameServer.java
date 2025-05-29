@@ -5,10 +5,11 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.util.concurrent.ConcurrentHashMap;
-
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Random;
 import org.json.JSONObject;
+import java.time.Instant;
 
 public class GameServer {
     private static final int PORT = 7777;
@@ -25,17 +26,44 @@ public class GameServer {
     private final Random random = new Random();
     private final RespawnManager respawnManager;
     private final ScoreManager scoreManager;
+    private final RecentConnections recentConnections;
 
     // Store connected players: Key = PlayerID, Value = Player Data
     private final Map<String, PlayerData> players = new ConcurrentHashMap<>();
     // Map to store client address to player ID mapping
     private final Map<String, String> clientToPlayerId = new ConcurrentHashMap<>();
+    // Map to store bullet owner information: Key = BulletID, Value = PlayerID
+    private final Map<String, String> bulletOwners = new ConcurrentHashMap<>();
+
+    private static class RecentConnections {
+        private final LinkedHashMap<String, Instant> connections;
+        private static final int MAX_ENTRIES = 100;
+
+        public RecentConnections() {
+            connections = new LinkedHashMap<String, Instant>() {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, Instant> eldest) {
+                    return size() > MAX_ENTRIES;
+                }
+            };
+        }
+
+        public void addConnection(String ip) {
+            connections.put(ip, Instant.now());
+        }
+
+        public boolean hasRecentlyConnected(String ip) {
+            Instant lastConnection = connections.get(ip);
+            if (lastConnection == null) return false;
+            return lastConnection.plusSeconds(300).isAfter(Instant.now()); // 5 minutes threshold
+        }
+    }
 
     public GameServer() throws IOException {
         socket = new DatagramSocket(PORT);
         System.out.println("Server started on port " + PORT);
         
-        // Initialize RespawnManager with callback
+        // Initialize managers
         respawnManager = new RespawnManager(respawnData -> {
             PlayerData player = players.get(respawnData.playerId);
             if (player != null) {
@@ -46,6 +74,7 @@ public class GameServer {
             }
         });
         this.scoreManager = new ScoreManager();
+        this.recentConnections = new RecentConnections();
     }
 
     private float[] getRandomSpawnPoint() {
@@ -129,6 +158,8 @@ public class GameServer {
             handleDeath(clientKey);
         } else if (parts[0].equals("DISCONNECT")) {
             handleDisconnect(clientKey);
+        } else if (parts[0].equals("DAMAGE")) {
+            handleDamage(clientKey, parts);
         }
     }
 
@@ -139,6 +170,15 @@ public class GameServer {
     }
 
     private void handleJoin(String clientKey, InetAddress address, int port) {
+        String ipAddress = address.getHostAddress();
+        
+        // Check if this IP has connected recently
+        if (recentConnections.hasRecentlyConnected(ipAddress)) {
+            System.out.println("Warning: Rapid reconnection attempt from " + ipAddress);
+            // You could add additional logic here, like rate limiting
+        }
+        
+        recentConnections.addConnection(ipAddress);
         float[] spawnPoint = getRandomSpawnPoint();
         String playerId = generatePlayerId(clientKey);
         
@@ -214,7 +254,9 @@ public class GameServer {
                 if (player != null) {
                     float dirX = Float.parseFloat(parts[1]);
                     float dirY = Float.parseFloat(parts[2]);
-                    broadcastShot(playerId, player.x, player.y, dirX, dirY);
+                    String bulletId = playerId + "_" + System.currentTimeMillis();
+                    bulletOwners.put(bulletId, playerId);
+                    broadcastShot(playerId, player.x, player.y, dirX, dirY, bulletId);
                 }
             }
         }
@@ -264,6 +306,35 @@ public class GameServer {
         }
     }
 
+    private void handleDamage(String clientKey, String[] parts) {
+        if (parts.length < 3) return;
+        String bulletId = parts[1];
+        String shooterId = bulletOwners.get(bulletId);
+        
+        if (shooterId != null) {
+            String victimId = clientToPlayerId.get(clientKey);
+            if (victimId != null && !victimId.equals(shooterId)) {
+                scoreManager.addKill(shooterId);
+                broadcastScores();
+                bulletOwners.remove(bulletId); // Clean up bullet owner mapping
+                
+                if (scoreManager.hasWinner()) {
+                    broadcastGameOver(scoreManager.getWinner());
+                    // Reset after a delay
+                    new Thread(() -> {
+                        try {
+                            Thread.sleep(5000);
+                            scoreManager.reset();
+                            broadcastScores();
+                        } catch (InterruptedException e) {
+                            // Silent fail
+                        }
+                    }).start();
+                }
+            }
+        }
+    }
+
     private void broadcastPlayerJoined(String playerId) {
         PlayerData player = players.get(playerId);
         String message = "JOIN|" + playerId + "|" + player.x + "|" + player.y;
@@ -275,8 +346,8 @@ public class GameServer {
         broadcast(message, excludeKey);
     }
 
-    private void broadcastShot(String playerId, float x, float y, float dirX, float dirY) {
-        String message = "SHOOT|" + playerId + "|" + x + "|" + y + "|" + dirX + "|" + dirY;
+    private void broadcastShot(String playerId, float x, float y, float dirX, float dirY, String bulletId) {
+        String message = "SHOOT|" + playerId + "|" + x + "|" + y + "|" + dirX + "|" + dirY + "|" + bulletId;
         broadcast(message, null);
     }
 
