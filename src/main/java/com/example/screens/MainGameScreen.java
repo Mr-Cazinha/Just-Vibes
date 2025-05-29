@@ -264,19 +264,25 @@ public class MainGameScreen implements Screen {
             float mouseX = Gdx.input.getX();
             float mouseY = Gdx.graphics.getHeight() - Gdx.input.getY();
             
-            // Calculate direction
+            // Calculate direction from player to mouse cursor in world coordinates
             Vector2 playerPos = localPlayer.getPosition();
-            float dirX = mouseX - playerPos.x;
-            float dirY = mouseY - playerPos.y;
+            Vector2 mouseWorldPos = new Vector2(
+                mouseX + camera.position.x - camera.viewportWidth/2,
+                mouseY + camera.position.y - camera.viewportHeight/2
+            );
+            
+            float dirX = mouseWorldPos.x - playerPos.x;
+            float dirY = mouseWorldPos.y - playerPos.y;
             float length = (float) Math.sqrt(dirX * dirX + dirY * dirY);
             dirX /= length;
             dirY /= length;
             
+            // Update player direction
+            localPlayer.setDirection(dirX, dirY);
+            
             // Create bullet and send shoot message
             Bullet bullet = new Bullet(localPlayerId, playerPos.x, playerPos.y, dirX, dirY);
             bullets.add(bullet);
-            String bulletId = localPlayerId + "_" + System.currentTimeMillis();
-            bulletOwners.put(bulletId, localPlayerId);
             
             try {
                 client.sendShoot(playerPos.x, playerPos.y, dirX, dirY);

@@ -25,11 +25,13 @@ public class Bullet {
     }
     
     public void update(float delta) {
+        if (!active) return;
         position.add(velocity.x * delta, velocity.y * delta);
         bounds.setPosition(position);
     }
     
     public void render(ShapeRenderer shapeRenderer) {
+        if (!active) return;
         shapeRenderer.setColor(Color.YELLOW);
         shapeRenderer.circle(position.x, position.y, RADIUS);
     }
@@ -39,6 +41,9 @@ public class Bullet {
     }
     
     public boolean checkCollision(Player player) {
+        if (!active || player.isDead() || player.getId().equals(ownerId)) {
+            return false;
+        }
         return Intersector.overlaps(bounds, player.getBounds());
     }
     
