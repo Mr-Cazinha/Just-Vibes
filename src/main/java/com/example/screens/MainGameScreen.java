@@ -76,16 +76,20 @@ public class MainGameScreen implements Screen {
             float y = Float.parseFloat(parts[3]);
             
             Gdx.app.postRunnable(() -> {
+                // Convert world coordinates to screen coordinates
+                float screenX = x - (camera.position.x - camera.viewportWidth/2);
+                float screenY = y - (camera.position.y - camera.viewportHeight/2);
+                
                 if (localPlayer == null && !isConnected) {
                     localPlayerId = playerId;
-                    localPlayer = new Player(playerId, x, y, true);
+                    localPlayer = new Player(playerId, screenX, screenY, true);
                     players.put(playerId, localPlayer);
                     isConnected = true;
                     gameScreen.dispose();
                     gameScreen = new GameScreen(game, playerId, client);
                 } else if (!playerId.equals(localPlayerId)) {
                     if (!players.containsKey(playerId)) {
-                        Player newPlayer = new Player(playerId, x, y, false);
+                        Player newPlayer = new Player(playerId, screenX, screenY, false);
                         players.put(playerId, newPlayer);
                     }
                 }
@@ -124,7 +128,10 @@ public class MainGameScreen implements Screen {
                 Gdx.app.postRunnable(() -> {
                     Player player = players.get(playerId);
                     if (player != null && !player.isLocal()) {
-                        player.updateNetworkPosition(x, y);
+                        // Convert world coordinates to screen coordinates
+                        float screenX = x - (camera.position.x - camera.viewportWidth/2);
+                        float screenY = y - (camera.position.y - camera.viewportHeight/2);
+                        player.updateNetworkPosition(screenX, screenY);
                     }
                 });
             }
@@ -335,41 +342,6 @@ public class MainGameScreen implements Screen {
         shapeRenderer.end();
     }
 
-    private void checkCollisions() {
-        if (localPlayer == null || localPlayer.isDead()) return;
-        
-        for (Player player : players.values()) {
-            if (player == null || player.isDead() || player.getId().equals(localPlayerId)) continue;
-            
-            // Check bullet collisions
-            for (Bullet bullet : bullets) {
-                if (bullet.checkCollision(player)) {
-                    try {
-                        String bulletId = bullet.getOwnerId() + "_" + System.currentTimeMillis();
-                        client.sendDamage(bulletId, BULLET_DAMAGE);
-                    } catch (IOException e) {
-                        Gdx.app.error("MainGameScreen", "Failed to send damage", e);
-                    }
-                    bullet.active = false;
-                }
-            }
-        }
-    }
-
-    private void updateRespawnTimer(float delta) {
-        if (localPlayer != null && localPlayer.isDead()) {
-            respawnCooldown -= delta;
-            if (respawnCooldown <= 0) {
-                try {
-                    client.sendRespawn();
-                    respawnCooldown = RESPAWN_DELAY;
-                } catch (IOException e) {
-                    Gdx.app.error("MainGameScreen", "Failed to send respawn", e);
-                }
-            }
-        }
-    }
-
     private void updateBullets(float delta) {
         Iterator<Bullet> bulletIterator = bullets.iterator();
         while (bulletIterator.hasNext()) {
@@ -382,17 +354,21 @@ public class MainGameScreen implements Screen {
                     // Apply damage to the hit player
                     player.setHealth(player.getHealth() - BULLET_DAMAGE);
                     
-                    // If health drops to 0, mark player as dead
-                    if (player.getHealth() <= 0) {
-                        player.setDead(true);
-                    }
-                    
                     // Send damage message to server
                     String bulletId = bullet.getOwnerId() + "_" + System.currentTimeMillis();
                     try {
                         client.sendDamage(bulletId, BULLET_DAMAGE);
+                        
+                        // If player died from this hit, send death message
+                        if (player.getHealth() <= 0) {
+                            if (player.isLocal()) {
+                                client.sendDeath();
+                                respawnCooldown = RESPAWN_DELAY;
+                            }
+                            player.setDead(true);
+                        }
                     } catch (IOException e) {
-                        Gdx.app.error("MainGameScreen", "Failed to send damage", e);
+                        Gdx.app.error("MainGameScreen", "Failed to send damage/death", e);
                     }
                     
                     // Remove the bullet
@@ -408,7 +384,29 @@ public class MainGameScreen implements Screen {
         }
     }
 
+    private void checkCollisions() {
+        // Remove this method as collision handling is now in updateBullets
+    }
+
     private void updatePlayers(float delta) {
+        if (localPlayer != null && !localPlayer.isDead()) {
+            // Send position updates more frequently for local player
+            playerUpdateTimer += delta;
+            if (playerUpdateTimer >= PLAYER_UPDATE_INTERVAL) {
+                playerUpdateTimer = 0;
+                try {
+                    Vector2 pos = localPlayer.getPosition();
+                    // Add camera offset to position for proper world coordinates
+                    float worldX = pos.x + camera.position.x - camera.viewportWidth/2;
+                    float worldY = pos.y + camera.position.y - camera.viewportHeight/2;
+                    client.sendPosition(localPlayer.getId(), worldX, worldY);
+                } catch (IOException e) {
+                    Gdx.app.error("MainGameScreen", "Failed to send position update", e);
+                }
+            }
+        }
+
+        // Update network players
         for (Player player : players.values()) {
             if (player != null && !player.isLocal()) {
                 player.update(delta, 0, 0);
@@ -416,7 +414,20 @@ public class MainGameScreen implements Screen {
         }
         
         updateRespawnTimer(delta);
-        checkCollisions();
+    }
+
+    private void updateRespawnTimer(float delta) {
+        if (localPlayer != null && localPlayer.isDead()) {
+            respawnCooldown -= delta;
+            if (respawnCooldown <= 0) {
+                try {
+                    client.sendRespawn();
+                    respawnCooldown = RESPAWN_DELAY;
+                } catch (IOException e) {
+                    Gdx.app.error("MainGameScreen", "Failed to send respawn", e);
+                }
+            }
+        }
     }
 
     private void checkMissingPlayers() {
