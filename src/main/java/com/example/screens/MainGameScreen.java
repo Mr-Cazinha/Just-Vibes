@@ -8,6 +8,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer.ShapeType;
+import com.badlogic.gdx.math.Vector2;
 
 import com.example.MyGame;
 import com.example.entities.Player;
@@ -142,8 +143,8 @@ public class MainGameScreen implements Screen {
                 Gdx.app.postRunnable(() -> {
                     Player shooter = players.get(playerId);
                     if (shooter != null) {
-                        shooter.position.set(x, y);
-                        shooter.direction.set(dirX, dirY).nor();
+                        shooter.updateNetworkPosition(x, y);
+                        shooter.setDirection(dirX, dirY);
                         Bullet bullet = new Bullet(playerId, x, y, dirX, dirY);
                         bullets.add(bullet);
                         bulletOwners.put(bulletId, playerId);
@@ -193,7 +194,7 @@ public class MainGameScreen implements Screen {
     private void updatePlayerState(Player player, float x, float y, float dirX, float dirY, int health, boolean isDead) {
         if (!player.isLocal()) {
             player.updateNetworkPosition(x, y);
-            player.direction.set(dirX, dirY);
+            player.setDirection(dirX, dirY);
             player.setHealth(health);
             player.setDead(isDead);
         }
@@ -252,7 +253,7 @@ public class MainGameScreen implements Screen {
             localPlayer.update(delta, moveX, moveY);
             
             try {
-                client.sendPosition(localPlayer.id, localPlayer.position.x, localPlayer.position.y);
+                client.sendPosition(localPlayer.getId(), localPlayer.getPosition().x, localPlayer.getPosition().y);
             } catch (IOException e) {
                 // Silent fail
             }
@@ -264,20 +265,21 @@ public class MainGameScreen implements Screen {
             float mouseY = Gdx.graphics.getHeight() - Gdx.input.getY();
             
             // Calculate direction
-            float dirX = mouseX - localPlayer.position.x;
-            float dirY = mouseY - localPlayer.position.y;
+            Vector2 playerPos = localPlayer.getPosition();
+            float dirX = mouseX - playerPos.x;
+            float dirY = mouseY - playerPos.y;
             float length = (float) Math.sqrt(dirX * dirX + dirY * dirY);
             dirX /= length;
             dirY /= length;
             
             // Create bullet and send shoot message
-            Bullet bullet = new Bullet(localPlayerId, localPlayer.position.x, localPlayer.position.y, dirX, dirY);
+            Bullet bullet = new Bullet(localPlayerId, playerPos.x, playerPos.y, dirX, dirY);
             bullets.add(bullet);
             String bulletId = localPlayerId + "_" + System.currentTimeMillis();
             bulletOwners.put(bulletId, localPlayerId);
             
             try {
-                client.sendShoot(localPlayer.position.x, localPlayer.position.y, dirX, dirY);
+                client.sendShoot(playerPos.x, playerPos.y, dirX, dirY);
             } catch (IOException e) {
                 Gdx.app.error("MainGameScreen", "Failed to send shoot message", e);
             }
@@ -384,7 +386,8 @@ public class MainGameScreen implements Screen {
     private void checkMissingPlayers() {
         try {
             // Request current player list from server
-            client.sendPosition(localPlayerId, localPlayer.position.x, localPlayer.position.y);
+            Vector2 pos = localPlayer.getPosition();
+            client.sendPosition(localPlayer.getId(), pos.x, pos.y);
         } catch (IOException e) {
             Gdx.app.error("MainGameScreen", "Failed to request player update", e);
         }

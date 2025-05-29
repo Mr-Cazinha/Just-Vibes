@@ -12,9 +12,9 @@ public class Player {
     private static final float HEALTH_BAR_HEIGHT = 5f;
     private static final float DIRECTION_INDICATOR_LENGTH = SIZE;
     
-    private final String id;
-    public final Vector2 position;
-    public final Vector2 direction;
+    protected final String id;
+    private final Vector2 position;
+    private final Vector2 direction;
     private final boolean isLocal;
     private final Circle bounds;
     private boolean isDead;
@@ -130,5 +130,17 @@ public class Player {
     
     public Circle getBounds() {
         return bounds;
+    }
+
+    public Vector2 getPosition() {
+        return position;
+    }
+
+    public Vector2 getDirection() {
+        return direction;
+    }
+
+    public void setDirection(float x, float y) {
+        direction.set(x, y).nor();
     }
 } 
