@@ -343,9 +343,16 @@ public class MainGameScreen implements Screen {
     }
 
     private void updateBullets(float delta) {
+        if (bullets.isEmpty()) return;
+        
         Iterator<Bullet> bulletIterator = bullets.iterator();
         while (bulletIterator.hasNext()) {
             Bullet bullet = bulletIterator.next();
+            if (bullet == null) {
+                bulletIterator.remove();
+                continue;
+            }
+            
             bullet.update(delta);
 
             // Check for bullet collisions with players
