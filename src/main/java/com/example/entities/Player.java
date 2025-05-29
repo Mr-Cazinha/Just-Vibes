@@ -113,6 +113,9 @@ public class Player {
     
     public void setHealth(int health) {
         this.health = Math.min(Math.max(health, 0), MAX_HEALTH);
+        if (this.health <= 0 && !isDead) {
+            setDead(true);
+        }
     }
     
     public int getHealth() {

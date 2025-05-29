@@ -260,6 +260,10 @@ public class MainGameScreen implements Screen {
         }
 
         // Shooting
+        boolean shouldShoot = false;
+        float dirX = 0, dirY = 0;
+        
+        // Mouse shooting
         if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && shootCooldown <= 0) {
             float mouseX = Gdx.input.getX();
             float mouseY = Gdx.graphics.getHeight() - Gdx.input.getY();
@@ -271,11 +275,26 @@ public class MainGameScreen implements Screen {
                 mouseY + camera.position.y - camera.viewportHeight/2
             );
             
-            float dirX = mouseWorldPos.x - playerPos.x;
-            float dirY = mouseWorldPos.y - playerPos.y;
+            dirX = mouseWorldPos.x - playerPos.x;
+            dirY = mouseWorldPos.y - playerPos.y;
             float length = (float) Math.sqrt(dirX * dirX + dirY * dirY);
             dirX /= length;
             dirY /= length;
+            shouldShoot = true;
+        }
+        
+        // Spacebar shooting
+        if (Gdx.input.isKeyJustPressed(Keys.SPACE) && shootCooldown <= 0) {
+            // Shoot in the direction the player is facing
+            Vector2 playerDir = localPlayer.getDirection();
+            dirX = playerDir.x;
+            dirY = playerDir.y;
+            shouldShoot = true;
+        }
+        
+        // Handle shooting if either mouse or spacebar triggered it
+        if (shouldShoot) {
+            Vector2 playerPos = localPlayer.getPosition();
             
             // Update player direction
             localPlayer.setDirection(dirX, dirY);
@@ -360,12 +379,23 @@ public class MainGameScreen implements Screen {
             // Check for bullet collisions with players
             for (Player player : players.values()) {
                 if (!player.isDead() && bullet.checkCollision(player)) {
+                    // Apply damage to the hit player
+                    player.setHealth(player.getHealth() - BULLET_DAMAGE);
+                    
+                    // If health drops to 0, mark player as dead
+                    if (player.getHealth() <= 0) {
+                        player.setDead(true);
+                    }
+                    
+                    // Send damage message to server
                     String bulletId = bullet.getOwnerId() + "_" + System.currentTimeMillis();
                     try {
                         client.sendDamage(bulletId, BULLET_DAMAGE);
                     } catch (IOException e) {
                         Gdx.app.error("MainGameScreen", "Failed to send damage", e);
                     }
+                    
+                    // Remove the bullet
                     bulletIterator.remove();
                     break;
                 }
