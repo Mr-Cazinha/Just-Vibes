@@ -17,9 +17,9 @@ public class GameServer {
     private static final int GAME_WIDTH = 800;
     private static final int GAME_HEIGHT = 600;
     @SuppressWarnings("unused")
-    private static final float MIN_RESPAWN_TIME = 20.0f;
+    private static final float MIN_RESPAWN_TIME = 5.0f;
     @SuppressWarnings("unused")
-    private static final float MAX_RESPAWN_TIME = 30.0f;
+    private static final float MAX_RESPAWN_TIME = 10.0f;
     private final DatagramSocket socket;
     private final byte[] receiveBuffer = new byte[BUFFER_SIZE];
     private boolean running = true;

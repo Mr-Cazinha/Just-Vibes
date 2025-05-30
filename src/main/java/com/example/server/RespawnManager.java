@@ -4,8 +4,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
 
 public class RespawnManager implements Runnable {
-    private static final float MIN_RESPAWN_TIME = 20.0f;
-    private static final float MAX_RESPAWN_TIME = 30.0f;
+    private static final float MIN_RESPAWN_TIME = 5.0f;
+    private static final float MAX_RESPAWN_TIME = 10.0f;
     private final ConcurrentLinkedQueue<RespawnData> respawnQueue;
     private final Consumer<RespawnData> onRespawnCallback;
     private volatile boolean running = true;
