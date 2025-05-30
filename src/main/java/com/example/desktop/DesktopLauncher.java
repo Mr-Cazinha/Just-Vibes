@@ -12,6 +12,7 @@ public class DesktopLauncher {
         config.useVsync(true);
         config.setForegroundFPS(60);
         
-        new Lwjgl3Application(new MyGame(), config);
+        String serverIp = args.length > 0 ? args[0] : "localhost";
+        new Lwjgl3Application(new MyGame(serverIp), config);
     }
 } 
