@@ -105,7 +105,7 @@ public class MainGameScreen implements Screen {
                     if (player != null && !player.isLocal()) {
                         // Convert world coordinates to screen coordinates
                         Vector2 screenPos = getScreenCoordinates(new Vector2(worldX, worldY));
-                        player.setPosition(screenPos.x, screenPos.y);
+                        player.updateNetworkPosition(screenPos.x, screenPos.y);
                     }
                 });
             }
@@ -525,6 +525,7 @@ public class MainGameScreen implements Screen {
             if (playerUpdateTimer >= PLAYER_UPDATE_INTERVAL) {
                 playerUpdateTimer = 0;
                 try {
+                    // Convert screen coordinates to world coordinates for network transmission
                     Vector2 worldPos = getWorldCoordinates(localPlayer.getPosition());
                     client.sendPosition(localPlayer.getId(), worldPos.x, worldPos.y);
                 } catch (IOException e) {
