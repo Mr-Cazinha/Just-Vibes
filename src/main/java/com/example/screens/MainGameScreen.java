@@ -96,17 +96,16 @@ public class MainGameScreen implements Screen {
         client.registerPosHandler(parts -> {
             if (parts.length < 4) return;
             String playerId = parts[1];
-            float x = Float.parseFloat(parts[2]);
-            float y = Float.parseFloat(parts[3]);
+            float worldX = Float.parseFloat(parts[2]);
+            float worldY = Float.parseFloat(parts[3]);
             
             if (!playerId.equals(localPlayerId)) {
                 Gdx.app.postRunnable(() -> {
                     Player player = players.get(playerId);
                     if (player != null && !player.isLocal()) {
                         // Convert world coordinates to screen coordinates
-                        float screenX = x - (camera.position.x - camera.viewportWidth/2);
-                        float screenY = y - (camera.position.y - camera.viewportHeight/2);
-                        player.updateNetworkPosition(screenX, screenY);
+                        Vector2 screenPos = getScreenCoordinates(new Vector2(worldX, worldY));
+                        player.setPosition(screenPos.x, screenPos.y);
                     }
                 });
             }
@@ -132,8 +131,8 @@ public class MainGameScreen implements Screen {
                 }
                 
                 String playerId = playerData[0];
-                float x = Float.parseFloat(playerData[1]);
-                float y = Float.parseFloat(playerData[2]);
+                float worldX = Float.parseFloat(playerData[1]);
+                float worldY = Float.parseFloat(playerData[2]);
                 boolean isDead = playerData[3].equals("1");
                 
                 // Remove from current players as we've seen it
@@ -142,21 +141,21 @@ public class MainGameScreen implements Screen {
                 if (!playerId.equals(localPlayerId)) {
                     Gdx.app.postRunnable(() -> {
                         // Convert world coordinates to screen coordinates
-                        float screenX = x - (camera.position.x - camera.viewportWidth/2);
-                        float screenY = y - (camera.position.y - camera.viewportHeight/2);
+                        Vector2 screenPos = getScreenCoordinates(new Vector2(worldX, worldY));
                         
                         Player player = players.get(playerId);
                         if (player == null) {
                             // Create new player if they don't exist
-                            player = new Player(playerId, screenX, screenY, false);
+                            player = new Player(playerId, screenPos.x, screenPos.y, false);
                             players.put(playerId, player);
                             System.out.println("[Client] Created new player from sync: " + playerId);
+                        } else {
+                            player.setPosition(screenPos.x, screenPos.y);
                         }
                         
                         // Update player state
-                        player.updateNetworkPosition(screenX, screenY);
                         player.setDead(isDead);
-                        System.out.println("[Client] Updated player " + playerId + " position: (" + screenX + ", " + screenY + ") dead: " + isDead);
+                        System.out.println("[Client] Updated player " + playerId + " position: (" + screenPos.x + ", " + screenPos.y + ") dead: " + isDead);
                     });
                 }
             }
@@ -359,7 +358,14 @@ public class MainGameScreen implements Screen {
             moveX /= length;
             moveY /= length;
             
-            localPlayer.update(delta, moveX, moveY);
+            // Update player in world coordinates
+            Vector2 worldPos = getWorldCoordinates(localPlayer.getPosition());
+            worldPos.x += moveX * Player.SPEED * delta;
+            worldPos.y += moveY * Player.SPEED * delta;
+            
+            // Convert back to screen coordinates
+            Vector2 screenPos = getScreenCoordinates(worldPos);
+            localPlayer.setPosition(screenPos.x, screenPos.y);
         }
 
         // Shooting
@@ -416,6 +422,20 @@ public class MainGameScreen implements Screen {
         }
         
         shootCooldown -= delta;
+    }
+
+    private Vector2 getWorldCoordinates(Vector2 screenPos) {
+        return new Vector2(
+            screenPos.x + camera.position.x - camera.viewportWidth/2,
+            screenPos.y + camera.position.y - camera.viewportHeight/2
+        );
+    }
+
+    private Vector2 getScreenCoordinates(Vector2 worldPos) {
+        return new Vector2(
+            worldPos.x - (camera.position.x - camera.viewportWidth/2),
+            worldPos.y - (camera.position.y - camera.viewportHeight/2)
+        );
     }
 
     private void renderGameElements() {
@@ -503,11 +523,8 @@ public class MainGameScreen implements Screen {
             if (playerUpdateTimer >= PLAYER_UPDATE_INTERVAL) {
                 playerUpdateTimer = 0;
                 try {
-                    Vector2 pos = localPlayer.getPosition();
-                    // Add camera offset to position for proper world coordinates
-                    float worldX = pos.x + camera.position.x - camera.viewportWidth/2;
-                    float worldY = pos.y + camera.position.y - camera.viewportHeight/2;
-                    client.sendPosition(localPlayer.getId(), worldX, worldY);
+                    Vector2 worldPos = getWorldCoordinates(localPlayer.getPosition());
+                    client.sendPosition(localPlayer.getId(), worldPos.x, worldPos.y);
                 } catch (IOException e) {
                     Gdx.app.error("MainGameScreen", "Failed to send position update", e);
                 }
@@ -553,6 +570,16 @@ public class MainGameScreen implements Screen {
         // Keep camera viewport fixed at 800x600 regardless of window size
         camera.viewportWidth = 800;
         camera.viewportHeight = 600;
+        
+        // Update all player positions to maintain their world positions
+        for (Player player : players.values()) {
+            if (player != null) {
+                Vector2 worldPos = getWorldCoordinates(player.getPosition());
+                Vector2 newScreenPos = getScreenCoordinates(worldPos);
+                player.setPosition(newScreenPos.x, newScreenPos.y);
+            }
+        }
+        
         camera.update();
     }
 

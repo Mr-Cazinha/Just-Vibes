@@ -6,7 +6,7 @@ import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Circle;
 
 public class Player {
-    private static final float SPEED = 200f;
+    public static final float SPEED = 200.0f; // pixels per second
     private static final float SIZE = 32f;
     private static final float RADIUS = SIZE / 2;
     private static final float HEALTH_BAR_HEIGHT = 5f;
