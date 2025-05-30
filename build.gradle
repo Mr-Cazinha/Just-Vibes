@@ -32,5 +32,12 @@ java {
 }
 
 application {
-    mainClass = 'com.example.desktop.DesktopLauncher'
+    mainClass = project.hasProperty('server') ? 'com.example.server.ServerLauncher' : 'com.example.desktop.DesktopLauncher'
+}
+
+task runServer(type: JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.example.server.ServerLauncher'
+    standardOutput = System.out
+    standardError = System.err
 } 
