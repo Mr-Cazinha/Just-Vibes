@@ -63,7 +63,8 @@ public class GameServer {
 
     public GameServer() throws IOException {
         socket = new DatagramSocket(PORT);
-        System.out.println("Server started on port " + PORT);
+        System.out.println("[Server] Started on port " + PORT);
+        System.out.println("[Server] State sync interval set to " + STATE_UPDATE_INTERVAL + " seconds");
         
         // Initialize managers
         respawnManager = new RespawnManager(respawnData -> {
@@ -124,6 +125,8 @@ public class GameServer {
 
     private void serverLoop() {
         long lastUpdateTime = System.nanoTime();
+        long lastSyncTime = System.nanoTime();
+        System.out.println("[Server] Server loop started");
         
         while (running) {
             try {
@@ -135,22 +138,35 @@ public class GameServer {
                 // Update state broadcast timer
                 stateUpdateTimer += deltaTime;
                 if (stateUpdateTimer >= STATE_UPDATE_INTERVAL) {
+                    System.out.println("[Server] State update timer triggered. Time since last sync: " + 
+                                     String.format("%.2f", (currentTime - lastSyncTime) / 1_000_000_000.0f) + "s");
+                    System.out.println("[Server] Number of connected players: " + players.size());
                     broadcastFullState();
                     stateUpdateTimer = 0;
+                    lastSyncTime = currentTime;
                 }
                 
                 // Handle incoming packets
-                while (socket.getReceiveBufferSize() > 0) {
-                    DatagramPacket packet = new DatagramPacket(receiveBuffer, receiveBuffer.length);
-                    socket.receive(packet);
-                    handlePacket(packet);
+                DatagramPacket packet = new DatagramPacket(receiveBuffer, receiveBuffer.length);
+                if (socket.isBound() && !socket.isClosed()) {
+                    try {
+                        socket.receive(packet);
+                        String message = new String(packet.getData(), 0, packet.getLength());
+                        System.out.println("[Server] Received packet: " + message);
+                        handlePacket(packet);
+                    } catch (IOException e) {
+                        if (running) {
+                            System.err.println("[Server] Error receiving packet: " + e.getMessage());
+                        }
+                    }
                 }
                 
                 // Small sleep to prevent CPU overuse
                 Thread.sleep(16); // Roughly 60 updates per second
-            } catch (IOException | InterruptedException e) {
+            } catch (Exception e) {
                 if (running) {
-                    // Silent fail
+                    System.err.println("[Server] Error in server loop: " + e.getMessage());
+                    e.printStackTrace();
                 }
             }
         }
@@ -487,7 +503,9 @@ public class GameServer {
                       .append(",").append(playerData.y)
                       .append(",").append(playerData.isDead ? "1" : "0");
         });
-        broadcast(syncMessage.toString(), null);
+        String finalMessage = syncMessage.toString();
+        System.out.println("[Server] Broadcasting sync message: " + finalMessage);
+        broadcast(finalMessage, null);
         
         // Send the JSON state update for other game state
         JSONObject state = new JSONObject();
@@ -504,6 +522,6 @@ public class GameServer {
         
         // Broadcast the full state to all clients
         broadcast(state.toString(), null);
-        System.out.println("Broadcasting full state update to all clients");
+        System.out.println("[Server] Full state update sent at: " + System.currentTimeMillis());
     }
 } 

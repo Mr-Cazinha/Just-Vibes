@@ -73,10 +73,12 @@ public class GameClient {
 
     private void handlePacket(DatagramPacket packet) {
         String message = new String(packet.getData(), 0, packet.getLength());
+        System.out.println("[Client] Received message: " + message);
         
         try {
             JSONObject json = new JSONObject(message);
             String type = json.getString("type");
+            System.out.println("[Client] Handling JSON message of type: " + type);
             Consumer<JSONObject> handler = jsonMessageHandlers.get(type);
             if (handler != null) {
                 handler.accept(json);
@@ -85,6 +87,7 @@ public class GameClient {
         } catch (JSONException e) {
             String[] parts = message.split("\\|");
             String messageType = parts[0];
+            System.out.println("[Client] Handling message of type: " + messageType);
 
             Consumer<String[]> handler = messageHandlers.get(messageType);
             if (handler != null) {
