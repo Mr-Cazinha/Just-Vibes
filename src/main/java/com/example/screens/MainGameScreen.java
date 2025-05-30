@@ -335,11 +335,16 @@ public class MainGameScreen implements Screen {
         }
         shapeRenderer.end();
 
-        shapeRenderer.begin(ShapeType.Filled);
-        for (Bullet bullet : bullets) {
-            bullet.render(shapeRenderer);
+        // Only render bullets if there are any
+        if (!bullets.isEmpty()) {
+            shapeRenderer.begin(ShapeType.Filled);
+            for (Bullet bullet : bullets) {
+                if (bullet != null && bullet.active) {
+                    bullet.render(shapeRenderer);
+                }
+            }
+            shapeRenderer.end();
         }
-        shapeRenderer.end();
     }
 
     private void updateBullets(float delta) {
