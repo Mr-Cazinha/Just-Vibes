@@ -1,17 +1,23 @@
 package com.example;
 
 import com.badlogic.gdx.Game;
-import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
 import com.example.screens.MainGameScreen;
 import com.example.screens.ConnectionScreen;
-import com.badlogic.gdx.Gdx;
 
 public class MyGame extends Game {
-    public SpriteBatch batch;
+    private static final int WINDOW_WIDTH = 800;
+    private static final int WINDOW_HEIGHT = 600;
+    private String serverIp;
+
+    public MyGame(String serverIp) {
+        this.serverIp = serverIp;
+    }
 
     @Override
     public void create() {
-        batch = new SpriteBatch();
         setScreen(new ConnectionScreen(this));
     }
 
@@ -21,14 +27,19 @@ public class MyGame extends Game {
     }
 
     public void exit() {
-        dispose();
         Gdx.app.exit();
     }
 
-    @Override
-    public void dispose() {
-        batch.dispose();
-        getScreen().dispose();
-        super.dispose();
+    public static void main(String[] args) {
+        String serverIp = args.length > 0 ? args[0] : "localhost";
+        
+        Lwjgl3ApplicationConfiguration config = new Lwjgl3ApplicationConfiguration();
+        config.setTitle("Just Vibes");
+        config.setWindowedMode(WINDOW_WIDTH, WINDOW_HEIGHT);
+        config.setResizable(false);  // Prevent window resizing
+        config.setMaximized(false);  // Prevent maximizing
+        config.setWindowIcon("icon.png");
+        
+        new Lwjgl3Application(new MyGame(serverIp), config);
     }
 } 

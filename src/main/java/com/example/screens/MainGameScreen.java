@@ -496,8 +496,9 @@ public class MainGameScreen implements Screen {
 
     @Override
     public void resize(int width, int height) {
-        camera.viewportWidth = width;
-        camera.viewportHeight = height;
+        // Keep camera viewport fixed at 800x600 regardless of window size
+        camera.viewportWidth = 800;
+        camera.viewportHeight = 600;
         camera.update();
     }
 
