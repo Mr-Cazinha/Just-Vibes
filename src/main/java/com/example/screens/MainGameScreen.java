@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Iterator;
+import org.json.JSONObject;
 
 public class MainGameScreen implements Screen {
     private final MyGame game;
@@ -36,10 +37,8 @@ public class MainGameScreen implements Screen {
     private Player localPlayer;
     private String localPlayerId;
     private float shootCooldown = 0;
-    @SuppressWarnings("unused")
     private float respawnCooldown = 0;
     private static final float SHOOT_DELAY = 0.5f;
-    @SuppressWarnings("unused")
     private static final float RESPAWN_DELAY = 3.0f;
     private static final int BULLET_DAMAGE = 20;
     private boolean isConnected = false;
@@ -85,13 +84,56 @@ public class MainGameScreen implements Screen {
                     localPlayer = new Player(playerId, screenX, screenY, true);
                     players.put(playerId, localPlayer);
                     isConnected = true;
-                    gameScreen.dispose();
-                    gameScreen = new GameScreen(game, playerId, client);
                 } else if (!playerId.equals(localPlayerId)) {
-                    if (!players.containsKey(playerId)) {
-                        Player newPlayer = new Player(playerId, screenX, screenY, false);
-                        players.put(playerId, newPlayer);
-                    }
+                    Player player = new Player(playerId, screenX, screenY, false);
+                    players.put(playerId, player);
+                }
+            });
+        });
+
+        // Add handler for full state updates
+        client.registerJsonHandler("FULL_STATE", jsonMessage -> {
+            Gdx.app.postRunnable(() -> {
+                try {
+                    // Handle player states
+                    JSONObject playersState = jsonMessage.getJSONObject("players");
+                    playersState.keys().forEachRemaining(playerId -> {
+                        if (!playerId.equals(localPlayerId)) {
+                            JSONObject playerState = playersState.getJSONObject(playerId);
+                            float x = (float)playerState.getDouble("x");
+                            float y = (float)playerState.getDouble("y");
+                            
+                            // Convert to screen coordinates
+                            float screenX = x - (camera.position.x - camera.viewportWidth/2);
+                            float screenY = y - (camera.position.y - camera.viewportHeight/2);
+                            
+                            Player player = players.get(playerId);
+                            if (player == null) {
+                                player = new Player(playerId, screenX, screenY, false);
+                                players.put(playerId, player);
+                            } else {
+                                player.updateNetworkPosition(screenX, screenY);
+                            }
+                        }
+                    });
+                    
+                    // Handle bullet states
+                    bullets.clear(); // Clear existing bullets
+                    JSONObject bulletsState = jsonMessage.getJSONObject("bullets");
+                    bulletsState.keys().forEachRemaining(bulletId -> {
+                        JSONObject bulletState = bulletsState.getJSONObject(bulletId);
+                        String ownerId = bulletState.getString("ownerId");
+                        Player owner = players.get(ownerId);
+                        if (owner != null) {
+                            Vector2 ownerPos = owner.getPosition();
+                            Vector2 ownerDir = owner.getDirection();
+                            Bullet bullet = new Bullet(ownerId, ownerPos.x, ownerPos.y, ownerDir.x, ownerDir.y);
+                            bullets.add(bullet);
+                            bulletOwners.put(bulletId, ownerId);
+                        }
+                    });
+                } catch (Exception e) {
+                    Gdx.app.error("MainGameScreen", "Error processing full state update", e);
                 }
             });
         });

@@ -27,6 +27,8 @@ public class GameServer {
     private final RespawnManager respawnManager;
     private final ScoreManager scoreManager;
     private final RecentConnections recentConnections;
+    private float stateUpdateTimer = 0;
+    private static final float STATE_UPDATE_INTERVAL = 30.0f; // 30 seconds
 
     // Store connected players: Key = PlayerID, Value = Player Data
     private final Map<String, PlayerData> players = new ConcurrentHashMap<>();
@@ -121,11 +123,22 @@ public class GameServer {
     }
 
     private void serverLoop() {
-        @SuppressWarnings("unused")
         long lastUpdateTime = System.nanoTime();
         
         while (running) {
             try {
+                // Calculate delta time
+                long currentTime = System.nanoTime();
+                float deltaTime = (currentTime - lastUpdateTime) / 1_000_000_000.0f;
+                lastUpdateTime = currentTime;
+                
+                // Update state broadcast timer
+                stateUpdateTimer += deltaTime;
+                if (stateUpdateTimer >= STATE_UPDATE_INTERVAL) {
+                    broadcastFullState();
+                    stateUpdateTimer = 0;
+                }
+                
                 // Handle incoming packets
                 while (socket.getReceiveBufferSize() > 0) {
                     DatagramPacket packet = new DatagramPacket(receiveBuffer, receiveBuffer.length);
@@ -456,5 +469,33 @@ public class GameServer {
             this.x = x;
             this.y = y;
         }
+    }
+
+    private void broadcastFullState() {
+        JSONObject state = new JSONObject();
+        state.put("type", "FULL_STATE");
+        
+        // Add all player states
+        JSONObject playersState = new JSONObject();
+        players.forEach((playerId, playerData) -> {
+            JSONObject playerState = new JSONObject();
+            playerState.put("x", playerData.x);
+            playerState.put("y", playerData.y);
+            playersState.put(playerId, playerState);
+        });
+        state.put("players", playersState);
+        
+        // Add all bullet states
+        JSONObject bulletsState = new JSONObject();
+        bulletOwners.forEach((bulletId, ownerId) -> {
+            JSONObject bulletState = new JSONObject();
+            bulletState.put("ownerId", ownerId);
+            bulletsState.put(bulletId, bulletState);
+        });
+        state.put("bullets", bulletsState);
+        
+        // Broadcast the full state to all clients
+        broadcast(state.toString(), null);
+        System.out.println("Broadcasting full state update to all clients");
     }
 } 
