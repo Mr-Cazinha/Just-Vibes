@@ -24,6 +24,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Iterator;
 import org.json.JSONObject;
+import java.util.HashSet;
+import java.util.Set;
 
 public class MainGameScreen implements Screen {
     private final MyGame game;
@@ -87,6 +89,72 @@ public class MainGameScreen implements Screen {
                 } else if (!playerId.equals(localPlayerId)) {
                     Player player = new Player(playerId, screenX, screenY, false);
                     players.put(playerId, player);
+                }
+            });
+        });
+
+        client.registerPosHandler(parts -> {
+            if (parts.length < 4) return;
+            String playerId = parts[1];
+            float x = Float.parseFloat(parts[2]);
+            float y = Float.parseFloat(parts[3]);
+            
+            if (!playerId.equals(localPlayerId)) {
+                Gdx.app.postRunnable(() -> {
+                    Player player = players.get(playerId);
+                    if (player != null && !player.isLocal()) {
+                        // Convert world coordinates to screen coordinates
+                        float screenX = x - (camera.position.x - camera.viewportWidth/2);
+                        float screenY = y - (camera.position.y - camera.viewportHeight/2);
+                        player.updateNetworkPosition(screenX, screenY);
+                    }
+                });
+            }
+        });
+
+        client.registerSyncHandler(parts -> {
+            if (parts.length < 2) return; // At least one player required
+            
+            // Create a set of current players to track removals
+            Set<String> currentPlayers = new HashSet<>(players.keySet());
+            
+            // Start from index 1 to skip the "SYNC" command
+            for (int i = 1; i < parts.length; i++) {
+                String[] playerData = parts[i].split(",");
+                if (playerData.length < 4) continue; // Skip invalid data
+                
+                String playerId = playerData[0];
+                float x = Float.parseFloat(playerData[1]);
+                float y = Float.parseFloat(playerData[2]);
+                boolean isDead = playerData[3].equals("1");
+                
+                // Remove from current players as we've seen it
+                currentPlayers.remove(playerId);
+                
+                if (!playerId.equals(localPlayerId)) {
+                    Gdx.app.postRunnable(() -> {
+                        // Convert world coordinates to screen coordinates
+                        float screenX = x - (camera.position.x - camera.viewportWidth/2);
+                        float screenY = y - (camera.position.y - camera.viewportHeight/2);
+                        
+                        Player player = players.get(playerId);
+                        if (player == null) {
+                            // Create new player if they don't exist
+                            player = new Player(playerId, screenX, screenY, false);
+                            players.put(playerId, player);
+                        }
+                        
+                        // Update player state
+                        player.updateNetworkPosition(screenX, screenY);
+                        player.setDead(isDead);
+                    });
+                }
+            }
+            
+            // Remove players that weren't in the sync message
+            currentPlayers.forEach(playerId -> {
+                if (!playerId.equals(localPlayerId)) {
+                    Gdx.app.postRunnable(() -> players.remove(playerId));
                 }
             });
         });
@@ -158,25 +226,6 @@ public class MainGameScreen implements Screen {
                     updatePlayerState(player, x, y, dirX, dirY, health, isDead);
                 }
             });
-        });
-
-        client.registerHandler("POS", parts -> {
-            if (parts.length < 4) return;
-            String playerId = parts[1];
-            float x = Float.parseFloat(parts[2]);
-            float y = Float.parseFloat(parts[3]);
-            
-            if (!playerId.equals(localPlayerId)) {
-                Gdx.app.postRunnable(() -> {
-                    Player player = players.get(playerId);
-                    if (player != null && !player.isLocal()) {
-                        // Convert world coordinates to screen coordinates
-                        float screenX = x - (camera.position.x - camera.viewportWidth/2);
-                        float screenY = y - (camera.position.y - camera.viewportHeight/2);
-                        player.updateNetworkPosition(screenX, screenY);
-                    }
-                });
-            }
         });
 
         client.registerHandler("SHOOT", parts -> {

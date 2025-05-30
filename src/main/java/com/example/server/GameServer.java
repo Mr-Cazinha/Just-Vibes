@@ -359,6 +359,11 @@ public class GameServer {
         broadcast(message, excludeKey);
     }
 
+    private void broadcastSync(String playerId, float x, float y) {
+        String message = "SYNC|" + playerId + "|" + x + "|" + y;
+        broadcast(message, null);
+    }
+
     private void broadcastShot(String playerId, float x, float y, float dirX, float dirY, String bulletId) {
         String message = "SHOOT|" + playerId + "|" + x + "|" + y + "|" + dirX + "|" + dirY + "|" + bulletId;
         broadcast(message, null);
@@ -462,30 +467,33 @@ public class GameServer {
         InetAddress address;
         int port;
         float x, y;
+        boolean isDead;
 
         PlayerData(InetAddress address, int port, float x, float y) {
             this.address = address;
             this.port = port;
             this.x = x;
             this.y = y;
+            this.isDead = false;
         }
     }
 
     private void broadcastFullState() {
+        // Create a SYNC message with all players
+        StringBuilder syncMessage = new StringBuilder("SYNC");
+        players.forEach((playerId, playerData) -> {
+            syncMessage.append("|").append(playerId)
+                      .append(",").append(playerData.x)
+                      .append(",").append(playerData.y)
+                      .append(",").append(playerData.isDead ? "1" : "0");
+        });
+        broadcast(syncMessage.toString(), null);
+        
+        // Send the JSON state update for other game state
         JSONObject state = new JSONObject();
         state.put("type", "FULL_STATE");
         
-        // Add all player states
-        JSONObject playersState = new JSONObject();
-        players.forEach((playerId, playerData) -> {
-            JSONObject playerState = new JSONObject();
-            playerState.put("x", playerData.x);
-            playerState.put("y", playerData.y);
-            playersState.put(playerId, playerState);
-        });
-        state.put("players", playersState);
-        
-        // Add all bullet states
+        // Add bullet states
         JSONObject bulletsState = new JSONObject();
         bulletOwners.forEach((bulletId, ownerId) -> {
             JSONObject bulletState = new JSONObject();
