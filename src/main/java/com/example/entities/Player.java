@@ -43,12 +43,38 @@ public class Player {
             // Local player movement
             if (moveX != 0 || moveY != 0) {
                 Vector2 movement = new Vector2(moveX, moveY).nor().scl(SPEED * delta);
+                
+                // Store current position in case we need to revert
+                float oldX = position.x;
+                float oldY = position.y;
+                
+                // Try to move
                 position.add(movement);
+                
+                // Check map boundaries (including player radius to prevent partial clipping)
+                if (position.x - RADIUS < 0) {
+                    position.x = RADIUS;
+                } else if (position.x + RADIUS > 800) { // Map width
+                    position.x = 800 - RADIUS;
+                }
+                
+                if (position.y - RADIUS < 0) {
+                    position.y = RADIUS;
+                } else if (position.y + RADIUS > 600) { // Map height
+                    position.y = 600 - RADIUS;
+                }
+                
+                // Update collision bounds
                 bounds.setPosition(position);
             }
         } else {
-            // Network player interpolation
+            // Network player interpolation with boundary checks
             position.lerp(targetPosition, LERP_ALPHA);
+            
+            // Apply boundary constraints
+            position.x = Math.max(RADIUS, Math.min(800 - RADIUS, position.x));
+            position.y = Math.max(RADIUS, Math.min(600 - RADIUS, position.y));
+            
             bounds.setPosition(position);
         }
     }
@@ -56,6 +82,9 @@ public class Player {
     public void updateNetworkPosition(float x, float y) {
         if (!isLocal) {
             previousPosition.set(position);
+            // Clamp target position to map boundaries
+            x = Math.max(RADIUS, Math.min(800 - RADIUS, x));
+            y = Math.max(RADIUS, Math.min(600 - RADIUS, y));
             targetPosition.set(x, y);
         }
     }
