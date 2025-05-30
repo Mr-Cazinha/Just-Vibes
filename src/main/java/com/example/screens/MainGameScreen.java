@@ -113,7 +113,12 @@ public class MainGameScreen implements Screen {
         });
 
         client.registerSyncHandler(parts -> {
-            if (parts.length < 2) return; // At least one player required
+            if (parts.length < 2) {
+                System.out.println("[Client] Received invalid sync message: too few parts");
+                return; // At least one player required
+            }
+            
+            System.out.println("[Client] Received sync message with " + (parts.length - 1) + " player updates");
             
             // Create a set of current players to track removals
             Set<String> currentPlayers = new HashSet<>(players.keySet());
@@ -121,7 +126,10 @@ public class MainGameScreen implements Screen {
             // Start from index 1 to skip the "SYNC" command
             for (int i = 1; i < parts.length; i++) {
                 String[] playerData = parts[i].split(",");
-                if (playerData.length < 4) continue; // Skip invalid data
+                if (playerData.length < 4) {
+                    System.out.println("[Client] Invalid player data at index " + i + ": " + String.join(",", playerData));
+                    continue; // Skip invalid data
+                }
                 
                 String playerId = playerData[0];
                 float x = Float.parseFloat(playerData[1]);
@@ -142,11 +150,13 @@ public class MainGameScreen implements Screen {
                             // Create new player if they don't exist
                             player = new Player(playerId, screenX, screenY, false);
                             players.put(playerId, player);
+                            System.out.println("[Client] Created new player from sync: " + playerId);
                         }
                         
                         // Update player state
                         player.updateNetworkPosition(screenX, screenY);
                         player.setDead(isDead);
+                        System.out.println("[Client] Updated player " + playerId + " position: (" + screenX + ", " + screenY + ") dead: " + isDead);
                     });
                 }
             }
@@ -154,6 +164,7 @@ public class MainGameScreen implements Screen {
             // Remove players that weren't in the sync message
             currentPlayers.forEach(playerId -> {
                 if (!playerId.equals(localPlayerId)) {
+                    System.out.println("[Client] Removing player not in sync: " + playerId);
                     Gdx.app.postRunnable(() -> players.remove(playerId));
                 }
             });
@@ -349,12 +360,6 @@ public class MainGameScreen implements Screen {
             moveY /= length;
             
             localPlayer.update(delta, moveX, moveY);
-            
-            try {
-                client.sendPosition(localPlayer.getId(), localPlayer.getPosition().x, localPlayer.getPosition().y);
-            } catch (IOException e) {
-                // Silent fail
-            }
         }
 
         // Shooting

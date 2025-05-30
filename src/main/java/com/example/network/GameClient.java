@@ -44,6 +44,14 @@ public class GameClient {
         this.onServerShutdown = callback;
     }
 
+    public void registerSyncHandler(Consumer<String[]> handler) {
+        registerHandler("SYNC", handler);
+    }
+
+    public void registerPosHandler(Consumer<String[]> handler) {
+        registerHandler("POS", handler);
+    }
+
     private void startReceiving() {
         Thread receiveThread = new Thread(this::receiveLoop);
         receiveThread.start();

@@ -80,13 +80,12 @@ public class Player {
     }
     
     public void updateNetworkPosition(float x, float y) {
-        if (!isLocal) {
-            previousPosition.set(position);
-            // Clamp target position to map boundaries
-            x = Math.max(RADIUS, Math.min(800 - RADIUS, x));
-            y = Math.max(RADIUS, Math.min(600 - RADIUS, y));
-            targetPosition.set(x, y);
-        }
+        position.x = x;
+        position.y = y;
+    }
+    
+    public void setPosition(float x, float y) {
+        position.set(x, y);
     }
     
     public void render(ShapeRenderer shapeRenderer) {
