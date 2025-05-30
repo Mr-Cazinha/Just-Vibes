@@ -241,8 +241,8 @@ public class MainGameScreen implements Screen {
         client.registerHandler("SHOOT", parts -> {
             if (parts.length < 7) return;
             String playerId = parts[1];
-            float x = Float.parseFloat(parts[2]);
-            float y = Float.parseFloat(parts[3]);
+            float worldX = Float.parseFloat(parts[2]);
+            float worldY = Float.parseFloat(parts[3]);
             float dirX = Float.parseFloat(parts[4]);
             float dirY = Float.parseFloat(parts[5]);
             String bulletId = parts[6];
@@ -251,9 +251,10 @@ public class MainGameScreen implements Screen {
                 Gdx.app.postRunnable(() -> {
                     Player shooter = players.get(playerId);
                     if (shooter != null) {
-                        shooter.updateNetworkPosition(x, y);
+                        Vector2 screenPos = getScreenCoordinates(new Vector2(worldX, worldY));
+                        shooter.updateNetworkPosition(screenPos.x, screenPos.y);
                         shooter.setDirection(dirX, dirY);
-                        Bullet bullet = new Bullet(playerId, x, y, dirX, dirY);
+                        Bullet bullet = new Bullet(playerId, screenPos.x, screenPos.y, dirX, dirY);
                         bullets.add(bullet);
                         bulletOwners.put(bulletId, playerId);
                     }
@@ -276,13 +277,14 @@ public class MainGameScreen implements Screen {
         client.registerHandler("RESPAWN", parts -> {
             if (parts.length < 4) return;
             String playerId = parts[1];
-            float x = Float.parseFloat(parts[2]);
-            float y = Float.parseFloat(parts[3]);
+            float worldX = Float.parseFloat(parts[2]);
+            float worldY = Float.parseFloat(parts[3]);
             
             Gdx.app.postRunnable(() -> {
                 Player player = players.get(playerId);
                 if (player != null) {
-                    player.respawn(x, y);
+                    Vector2 screenPos = getScreenCoordinates(new Vector2(worldX, worldY));
+                    player.respawn(screenPos.x, screenPos.y);
                 }
             });
         });

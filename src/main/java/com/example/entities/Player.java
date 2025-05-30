@@ -43,49 +43,44 @@ public class Player {
             // Local player movement
             if (moveX != 0 || moveY != 0) {
                 Vector2 movement = new Vector2(moveX, moveY).nor().scl(SPEED * delta);
-                
-                // Store current position in case we need to revert
-                float oldX = position.x;
-                float oldY = position.y;
-                
-                // Try to move
                 position.add(movement);
                 
                 // Check map boundaries (including player radius to prevent partial clipping)
-                if (position.x - RADIUS < 0) {
-                    position.x = RADIUS;
-                } else if (position.x + RADIUS > 800) { // Map width
-                    position.x = 800 - RADIUS;
-                }
-                
-                if (position.y - RADIUS < 0) {
-                    position.y = RADIUS;
-                } else if (position.y + RADIUS > 600) { // Map height
-                    position.y = 600 - RADIUS;
-                }
+                position.x = Math.max(RADIUS, Math.min(800 - RADIUS, position.x));
+                position.y = Math.max(RADIUS, Math.min(600 - RADIUS, position.y));
                 
                 // Update collision bounds
                 bounds.setPosition(position);
             }
         } else {
-            // Network player interpolation with boundary checks
-            position.lerp(targetPosition, LERP_ALPHA);
-            
-            // Apply boundary constraints
-            position.x = Math.max(RADIUS, Math.min(800 - RADIUS, position.x));
-            position.y = Math.max(RADIUS, Math.min(600 - RADIUS, position.y));
-            
-            bounds.setPosition(position);
+            // Network player movement - smooth interpolation
+            if (targetPosition != null) {
+                position.lerp(targetPosition, LERP_ALPHA);
+                bounds.setPosition(position);
+            }
         }
     }
     
     public void updateNetworkPosition(float x, float y) {
-        position.x = x;
-        position.y = y;
+        if (!isLocal) {
+            if (targetPosition == null) {
+                targetPosition = new Vector2(x, y);
+            } else {
+                targetPosition.set(x, y);
+            }
+            // If this is the first position update, set the position directly
+            if (position.x == 0 && position.y == 0) {
+                position.set(x, y);
+            }
+        }
     }
     
     public void setPosition(float x, float y) {
         position.set(x, y);
+        if (targetPosition != null) {
+            targetPosition.set(x, y);
+        }
+        bounds.setPosition(position);
     }
     
     public void render(ShapeRenderer shapeRenderer) {
