@@ -28,7 +28,7 @@ public class GameServer {
     private final ScoreManager scoreManager;
     private final RecentConnections recentConnections;
     private float stateUpdateTimer = 0;
-    private static final float STATE_UPDATE_INTERVAL = 30.0f; // 30 seconds
+    private static final float STATE_UPDATE_INTERVAL = 5.0f; // Changed from 30 to 5 seconds
 
     // Store connected players: Key = PlayerID, Value = Player Data
     private final Map<String, PlayerData> players = new ConcurrentHashMap<>();
@@ -141,9 +141,11 @@ public class GameServer {
                     System.out.println("[Server] State update timer triggered. Time since last sync: " + 
                                      String.format("%.2f", (currentTime - lastSyncTime) / 1_000_000_000.0f) + "s");
                     System.out.println("[Server] Number of connected players: " + players.size());
+                    System.out.println("[Server] Current players: " + String.join(", ", players.keySet()));
                     broadcastFullState();
                     stateUpdateTimer = 0;
                     lastSyncTime = currentTime;
+                    System.out.println("[Server] Sync complete at: " + System.currentTimeMillis());
                 }
                 
                 // Handle incoming packets
@@ -152,7 +154,6 @@ public class GameServer {
                     try {
                         socket.receive(packet);
                         String message = new String(packet.getData(), 0, packet.getLength());
-                        System.out.println("[Server] Received packet: " + message);
                         handlePacket(packet);
                     } catch (IOException e) {
                         if (running) {
@@ -505,6 +506,7 @@ public class GameServer {
         });
         String finalMessage = syncMessage.toString();
         System.out.println("[Server] Broadcasting sync message: " + finalMessage);
+        System.out.println("[Server] Number of players in sync: " + (finalMessage.split("\\|").length - 1));
         broadcast(finalMessage, null);
         
         // Send the JSON state update for other game state
@@ -520,8 +522,19 @@ public class GameServer {
         });
         state.put("bullets", bulletsState);
         
+        // Add player states
+        JSONObject playersState = new JSONObject();
+        players.forEach((playerId, playerData) -> {
+            JSONObject playerState = new JSONObject();
+            playerState.put("x", playerData.x);
+            playerState.put("y", playerData.y);
+            playerState.put("isDead", playerData.isDead);
+            playersState.put(playerId, playerState);
+        });
+        state.put("players", playersState);
+        
         // Broadcast the full state to all clients
         broadcast(state.toString(), null);
-        System.out.println("[Server] Full state update sent at: " + System.currentTimeMillis());
+        System.out.println("[Server] Full state update sent with " + players.size() + " players and " + bulletOwners.size() + " bullets");
     }
 } 

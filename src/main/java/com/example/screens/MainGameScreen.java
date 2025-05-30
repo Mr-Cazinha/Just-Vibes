@@ -70,29 +70,6 @@ public class MainGameScreen implements Screen {
     }
 
     private void setupNetworkHandlers() {
-        client.registerHandler("JOIN", parts -> {
-            if (parts.length < 4) return;
-            String playerId = parts[1];
-            float x = Float.parseFloat(parts[2]);
-            float y = Float.parseFloat(parts[3]);
-            
-            Gdx.app.postRunnable(() -> {
-                // Convert world coordinates to screen coordinates
-                float screenX = x - (camera.position.x - camera.viewportWidth/2);
-                float screenY = y - (camera.position.y - camera.viewportHeight/2);
-                
-                if (localPlayer == null && !isConnected) {
-                    localPlayerId = playerId;
-                    localPlayer = new Player(playerId, screenX, screenY, true);
-                    players.put(playerId, localPlayer);
-                    isConnected = true;
-                } else if (!playerId.equals(localPlayerId)) {
-                    Player player = new Player(playerId, screenX, screenY, false);
-                    players.put(playerId, player);
-                }
-            });
-        });
-
         client.registerPosHandler(parts -> {
             if (parts.length < 4) return;
             String playerId = parts[1];
@@ -103,31 +80,49 @@ public class MainGameScreen implements Screen {
                 Gdx.app.postRunnable(() -> {
                     Player player = players.get(playerId);
                     if (player != null && !player.isLocal()) {
-                        // Convert world coordinates to screen coordinates
-                        Vector2 screenPos = getScreenCoordinates(new Vector2(worldX, worldY));
-                        player.updateNetworkPosition(screenPos.x, screenPos.y);
+                        // Store world position directly, no conversion needed
+                        player.setWorldPosition(worldX, worldY);
                     }
                 });
             }
         });
 
+        client.registerHandler("JOIN", parts -> {
+            if (parts.length < 4) return;
+            String playerId = parts[1];
+            float worldX = Float.parseFloat(parts[2]);
+            float worldY = Float.parseFloat(parts[3]);
+            
+            Gdx.app.postRunnable(() -> {
+                if (localPlayer == null && !isConnected) {
+                    localPlayerId = playerId;
+                    localPlayer = new Player(playerId, worldX, worldY, true);
+                    players.put(playerId, localPlayer);
+                    isConnected = true;
+                } else if (!playerId.equals(localPlayerId)) {
+                    Player player = new Player(playerId, worldX, worldY, false);
+                    players.put(playerId, player);
+                }
+            });
+        });
+
         client.registerSyncHandler(parts -> {
             if (parts.length < 2) {
                 System.out.println("[Client] Received invalid sync message: too few parts");
-                return; // At least one player required
+                return;
             }
             
             System.out.println("[Client] Received sync message with " + (parts.length - 1) + " player updates");
+            System.out.println("[Client] Local player ID: " + localPlayerId);
+            System.out.println("[Client] Current players before sync: " + String.join(", ", players.keySet()));
             
-            // Create a set of current players to track removals
             Set<String> currentPlayers = new HashSet<>(players.keySet());
             
-            // Start from index 1 to skip the "SYNC" command
             for (int i = 1; i < parts.length; i++) {
                 String[] playerData = parts[i].split(",");
                 if (playerData.length < 4) {
                     System.out.println("[Client] Invalid player data at index " + i + ": " + String.join(",", playerData));
-                    continue; // Skip invalid data
+                    continue;
                 }
                 
                 String playerId = playerData[0];
@@ -135,41 +130,39 @@ public class MainGameScreen implements Screen {
                 float worldY = Float.parseFloat(playerData[2]);
                 boolean isDead = playerData[3].equals("1");
                 
-                // Remove from current players as we've seen it
+                System.out.println("[Client] Processing player in sync: " + playerId + " at (" + worldX + ", " + worldY + ") dead: " + isDead);
+                
                 currentPlayers.remove(playerId);
                 
-                if (!playerId.equals(localPlayerId)) {
-                    Gdx.app.postRunnable(() -> {
-                        // Convert world coordinates to screen coordinates
-                        Vector2 screenPos = getScreenCoordinates(new Vector2(worldX, worldY));
-                        
-                        Player player = players.get(playerId);
-                        if (player == null) {
-                            // Create new player if they don't exist
-                            player = new Player(playerId, screenPos.x, screenPos.y, false);
-                            players.put(playerId, player);
-                            System.out.println("[Client] Created new player from sync: " + playerId);
-                        } else {
-                            player.setPosition(screenPos.x, screenPos.y);
-                        }
-                        
-                        // Update player state
-                        player.setDead(isDead);
-                        System.out.println("[Client] Updated player " + playerId + " position: (" + screenPos.x + ", " + screenPos.y + ") dead: " + isDead);
-                    });
-                }
+                Gdx.app.postRunnable(() -> {
+                    Player player = players.get(playerId);
+                    if (player == null) {
+                        // Create new player if they don't exist
+                        boolean isLocal = playerId.equals(localPlayerId);
+                        player = new Player(playerId, worldX, worldY, isLocal);
+                        players.put(playerId, player);
+                        System.out.println("[Client] Created new player from sync: " + playerId);
+                    } else {
+                        // Update position for all players, including local player
+                        player.setWorldPosition(worldX, worldY);
+                        System.out.println("[Client] Updated " + (player.isLocal() ? "local" : "remote") + 
+                                         " player from sync: " + playerId);
+                    }
+                    player.setDead(isDead);
+                });
             }
             
-            // Remove players that weren't in the sync message
+            System.out.println("[Client] Players to remove: " + String.join(", ", currentPlayers));
             currentPlayers.forEach(playerId -> {
                 if (!playerId.equals(localPlayerId)) {
                     System.out.println("[Client] Removing player not in sync: " + playerId);
                     Gdx.app.postRunnable(() -> players.remove(playerId));
                 }
             });
+            
+            System.out.println("[Client] Current players after sync: " + String.join(", ", players.keySet()));
         });
 
-        // Add handler for full state updates
         client.registerJsonHandler("FULL_STATE", jsonMessage -> {
             Gdx.app.postRunnable(() -> {
                 try {
@@ -181,16 +174,12 @@ public class MainGameScreen implements Screen {
                             float x = (float)playerState.getDouble("x");
                             float y = (float)playerState.getDouble("y");
                             
-                            // Convert to screen coordinates
-                            float screenX = x - (camera.position.x - camera.viewportWidth/2);
-                            float screenY = y - (camera.position.y - camera.viewportHeight/2);
-                            
                             Player player = players.get(playerId);
                             if (player == null) {
-                                player = new Player(playerId, screenX, screenY, false);
+                                player = new Player(playerId, x, y, false);
                                 players.put(playerId, player);
                             } else {
-                                player.updateNetworkPosition(screenX, screenY);
+                                player.setWorldPosition(x, y);
                             }
                         }
                     });
@@ -251,10 +240,10 @@ public class MainGameScreen implements Screen {
                 Gdx.app.postRunnable(() -> {
                     Player shooter = players.get(playerId);
                     if (shooter != null) {
-                        Vector2 screenPos = getScreenCoordinates(new Vector2(worldX, worldY));
-                        shooter.updateNetworkPosition(screenPos.x, screenPos.y);
+                        shooter.setWorldPosition(worldX, worldY);
                         shooter.setDirection(dirX, dirY);
-                        Bullet bullet = new Bullet(playerId, screenPos.x, screenPos.y, dirX, dirY);
+                        // Create bullet in world coordinates
+                        Bullet bullet = new Bullet(playerId, worldX, worldY, dirX, dirY);
                         bullets.add(bullet);
                         bulletOwners.put(bulletId, playerId);
                     }
@@ -303,7 +292,7 @@ public class MainGameScreen implements Screen {
 
     private void updatePlayerState(Player player, float x, float y, float dirX, float dirY, int health, boolean isDead) {
         if (!player.isLocal()) {
-            player.updateNetworkPosition(x, y);
+            player.setWorldPosition(x, y);
             player.setDirection(dirX, dirY);
             player.setHealth(health);
             player.setDead(isDead);
@@ -361,13 +350,11 @@ public class MainGameScreen implements Screen {
             moveY /= length;
             
             // Update player in world coordinates
-            Vector2 worldPos = getWorldCoordinates(localPlayer.getPosition());
+            Vector2 worldPos = localPlayer.getPosition();
             worldPos.x += moveX * Player.SPEED * delta;
             worldPos.y += moveY * Player.SPEED * delta;
             
-            // Convert back to screen coordinates
-            Vector2 screenPos = getScreenCoordinates(worldPos);
-            localPlayer.setPosition(screenPos.x, screenPos.y);
+            localPlayer.setWorldPosition(worldPos.x, worldPos.y);
         }
 
         // Shooting
@@ -396,21 +383,17 @@ public class MainGameScreen implements Screen {
         
         // Spacebar shooting
         if (Gdx.input.isKeyJustPressed(Keys.SPACE) && shootCooldown <= 0) {
-            // Shoot in the direction the player is facing
             Vector2 playerDir = localPlayer.getDirection();
             dirX = playerDir.x;
             dirY = playerDir.y;
             shouldShoot = true;
         }
         
-        // Handle shooting if either mouse or spacebar triggered it
         if (shouldShoot) {
             Vector2 playerPos = localPlayer.getPosition();
             
-            // Update player direction
             localPlayer.setDirection(dirX, dirY);
             
-            // Create bullet and send shoot message
             Bullet bullet = new Bullet(localPlayerId, playerPos.x, playerPos.y, dirX, dirY);
             bullets.add(bullet);
             
@@ -441,6 +424,13 @@ public class MainGameScreen implements Screen {
     }
 
     private void renderGameElements() {
+        // Update screen positions for all players
+        for (Player player : players.values()) {
+            if (player != null) {
+                player.updateScreenPosition(camera);
+            }
+        }
+
         shapeRenderer.begin(ShapeType.Filled);
         cityBackground.render(shapeRenderer);
         shapeRenderer.end();
@@ -520,13 +510,11 @@ public class MainGameScreen implements Screen {
 
     private void updatePlayers(float delta) {
         if (localPlayer != null && !localPlayer.isDead()) {
-            // Send position updates more frequently for local player
             playerUpdateTimer += delta;
             if (playerUpdateTimer >= PLAYER_UPDATE_INTERVAL) {
                 playerUpdateTimer = 0;
                 try {
-                    // Convert screen coordinates to world coordinates for network transmission
-                    Vector2 worldPos = getWorldCoordinates(localPlayer.getPosition());
+                    Vector2 worldPos = localPlayer.getPosition();
                     client.sendPosition(localPlayer.getId(), worldPos.x, worldPos.y);
                 } catch (IOException e) {
                     Gdx.app.error("MainGameScreen", "Failed to send position update", e);
@@ -534,7 +522,6 @@ public class MainGameScreen implements Screen {
             }
         }
 
-        // Update network players
         for (Player player : players.values()) {
             if (player != null && !player.isLocal()) {
                 player.update(delta, 0, 0);
@@ -570,17 +557,12 @@ public class MainGameScreen implements Screen {
 
     @Override
     public void resize(int width, int height) {
-        // Keep camera viewport fixed at 800x600 regardless of window size
         camera.viewportWidth = 800;
         camera.viewportHeight = 600;
         
-        // Update all player positions to maintain their world positions
-        for (Player player : players.values()) {
-            if (player != null) {
-                Vector2 worldPos = getWorldCoordinates(player.getPosition());
-                Vector2 newScreenPos = getScreenCoordinates(worldPos);
-                player.setPosition(newScreenPos.x, newScreenPos.y);
-            }
+        if (localPlayer != null) {
+            Vector2 worldPos = localPlayer.getPosition();
+            localPlayer.setWorldPosition(worldPos.x, worldPos.y);
         }
         
         camera.update();
